@@ -1,5 +1,10 @@
-from fastapi import FastAPI
-from app.database import engine, Base
+from dotenv import load_dotenv
+load_dotenv()
+
+from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
+from app.database import get_supabase_client, check_database_connection
+from datetime import datetime
 import logging
 
 # Set up simple logging to see what starts
@@ -13,16 +18,79 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Base.metadata.create_all(bind=engine) # Keeping commented out until models exist
+# Add CORS middleware for OAuth flow
+# In production, restrict origins to deployed frontend URL
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from app.routes.roadmap_routes import router as roadmap_router
+from app.routes.auth_routes import router as auth_router
+app.include_router(roadmap_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 @app.on_event("startup")
 def on_startup():
-    logger.info("FastAPI service started.")
+    """Startup event to verify Supabase connection and log initialization."""
+    logger.info("FastAPI service starting...")
+    
+    try:
+        # Initialize Supabase client
+        client = get_supabase_client()
+        logger.info("Supabase client initialized successfully")
+        
+        # Verify database connection
+        if check_database_connection():
+            logger.info("Database connection verified - service ready")
+        else:
+            logger.warning("Database connection check failed - service may not be fully operational")
+    except Exception as e:
+        logger.error(f"Startup error: {str(e)}")
+        raise
 
 @app.get("/")
 def read_root():
     return {"message": "CrackDSA API running"}
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok"}
+def health_check(response: Response):
+    """
+    Health check endpoint that reports app status and database connectivity.
+    
+    Returns:
+        dict: Health status with app status, database status, and timestamp
+        Status Code: 200 if everything is healthy, 503 if database is unreachable
+    """
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    
+    try:
+        # Check database connection
+        db_connected = check_database_connection()
+        
+        if db_connected:
+            response.status_code = 200
+            return {
+                "status": "ok",
+                "database": "connected",
+                "timestamp": timestamp
+            }
+        else:
+            response.status_code = 503
+            return {
+                "status": "degraded",
+                "database": "disconnected",
+                "timestamp": timestamp
+            }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        response.status_code = 503
+        return {
+            "status": "error",
+            "database": "disconnected",
+            "error": str(e),
+            "timestamp": timestamp
+        }

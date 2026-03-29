@@ -1,23 +1,60 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from supabase import create_client, Client
 from app.config import settings
+import logging
 
-# If no DATABASE_URL is provided, we can default to a sqlite in-memory db just to let the app start
-SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL or "sqlite:///./test.db"
+logger = logging.getLogger(__name__)
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
-)
+# Supabase Client Configuration
+_supabase_client: Client | None = None
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def get_supabase_client() -> Client:
+    """
+    Get or initialize the Supabase client.
+    
+    Returns:
+        Client: Supabase client instance
+        
+    Raises:
+        ValueError: If SUPABASE_URL or SUPABASE_KEY are not configured
+    """
+    global _supabase_client
+    
+    if _supabase_client is not None:
+        return _supabase_client
+    
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        raise ValueError(
+            "Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY environment variables."
+        )
+    
+    _supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    return _supabase_client
 
-Base = declarative_base()
-
-# Dependency
-def get_db():
-    db = SessionLocal()
+def check_database_connection() -> bool:
+    """
+    Check if the database connection is alive.
+    
+    Uses Supabase Auth's get_session() as a lightweight health check
+    that doesn't require any specific tables to exist.
+    
+    Returns:
+        bool: True if connection is successful, False otherwise
+    """
     try:
-        yield db
-    finally:
-        db.close()
+        client = get_supabase_client()
+        # Lightweight connection test via auth endpoint
+        # This tests Supabase connectivity without requiring any database tables
+        client.auth.get_session()
+        logger.info("Database connection verified successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Database connection check failed: {str(e)}")
+        return False
+
+# Legacy SQLAlchemy imports for backward compatibility (to be phased out)
+# These are kept commented to avoid import errors in existing code
+# Future refactoring should migrate all code to use Supabase client directly
+# from sqlalchemy import create_engine
+# from sqlalchemy.orm import sessionmaker, declarative_base
+# engine = None
+# Base = None
