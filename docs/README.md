@@ -2,12 +2,36 @@
 
 ## 📚 Documentation Index
 
-This directory contains comprehensive documentation for the CrackDSA API backend, with a focus on the new Supabase integration and authentication system.
+This directory contains comprehensive documentation for the CrackDSA API backend.
+
+### Start Here ⭐
+
+**[API-REFERENCE.md](API-REFERENCE.md)** - Complete endpoint documentation with examples
+- All endpoints (Health, Auth, Test, Roadmap)
+- Request/response formats
+- Authentication patterns
+- Implementation examples
+
+---
 
 ### Core Documentation
 
-#### 1. [Supabase Integration Guide](supabase-integration.md)
-**Complete setup and implementation guide for Supabase**
+#### 1. [API Reference](API-REFERENCE.md) ⭐ **NEW**
+**Complete reference for all API endpoints**
+
+Covers:
+- Authentication system and token handling
+- All endpoints with request/response examples
+- Common implementation patterns
+- Testing with cURL
+- Interactive documentation
+
+**When to read**: Building API integrations, protecting routes, endpoint reference
+
+---
+
+#### 2. [Supabase Integration Guide](supabase-integration.md)
+**Backend integration with Supabase - database and authentication**
 
 - Overview of Supabase architecture (database + auth)
 - Step-by-step setup instructions for Supabase projects
@@ -57,7 +81,24 @@ This directory contains comprehensive documentation for the CrackDSA API backend
 
 ---
 
-#### 5. [OAuth Integration Frontend Guide](oauth-integration-frontend.md)
+#### 3a. [Role-Based Access Control (RBAC)](RBAC.md) ⭐ **NEW**
+**Complete guide to implementing role-based access control**
+
+Covers:
+- Role configuration via environment variables
+- Role assignment by email addresses
+- Five types of role-checking dependencies
+- Usage examples for common patterns
+- Testing RBAC endpoints
+- Security considerations
+- Adding custom roles
+- Production deployment checklist
+
+**When to read**: Restricting endpoints to specific user roles, implementing authorization beyond authentication
+
+---
+
+#### 4. [Health Endpoint API Documentation](health-endpoint-api.md)
 **Step-by-step guide for integrating Supabase Google OAuth from frontend to backend**
 
 - Overall OAuth architecture and flow diagram

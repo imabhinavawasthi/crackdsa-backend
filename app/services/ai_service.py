@@ -1,13 +1,15 @@
+"""AI service using Google Gemini."""
+
 import json
-import os
 import google.generativeai as genai
 from typing import List, Dict, Any
+from app.config import settings
 from app.models.user_preferences import UserPreferences
 from app.models.roadmap import RoadmapResponse
 
 # Initialize Gemini SDK
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash')
+genai.configure(api_key=settings.GEMINI_API_KEY)
+
 
 async def generate_roadmap_from_ai(prefs: UserPreferences, problems: List[Dict[str, Any]]) -> RoadmapResponse:
     """
@@ -45,6 +47,7 @@ Please generate a highly personalized, structured {prefs.timeline_days}-day road
 
     prompt_content = f"{system_prompt}\n\n{user_prompt}"
     
+    model = genai.GenerativeModel(settings.GEMINI_MODEL)
     response = await model.generate_content_async(
         prompt_content,
         generation_config=genai.GenerationConfig(

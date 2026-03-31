@@ -99,54 +99,44 @@ class Settings(BaseSettings):
 
 Environment variables are automatically loaded from `.env` file.
 
-### [app/middleware/auth.py](../app/middleware/auth.py)
-**JWT Authentication**
+### [app/dependencies.py](../app/dependencies.py)
+**Centralized authentication dependencies**
 
 Functions:
-- `verify_token(credentials)` → Validates JWT token with Supabase
-- `get_current_user()` → FastAPI dependency for protected routes
-- `get_current_user_optional()` → Conditional authentication
+- `_extract_token_from_header()` → Helper to get token from cookie or header
+- `_build_user_response()` → Helper to construct clean user data dict
+- `get_current_user()` → FastAPI dependency for protected routes (returns 401 if no token)
+- `get_current_user_optional()` → FastAPI dependency for optional auth (returns None if no token)
+
+```python
+from app.dependencies import get_current_user, get_current_user_optional
+
+# Protected route
+@router.get("/protected")
+async def protected(user = Depends(get_current_user)):
+    return {"user_id": user['id']}
+
+# Optional auth
+@router.get("/optional")
+async def optional(user = Depends(get_current_user_optional)):
+    if user:
+        return {"message": f"Hello {user['full_name']}"}
+    else:
+        return {"message": "Hello guest"}
+```
+
+---
 
 ## API Endpoints
 
-### Health Check
-**Endpoint**: `GET /health`
+For complete API endpoint documentation, see **[API-REFERENCE.md](API-REFERENCE.md)**.
 
-**Authentication**: Not required (public)
-
-**Response** (Success - HTTP 200):
-```json
-{
-  "status": "ok",
-  "database": "connected",
-  "timestamp": "2025-03-29T10:15:30Z"
-}
-```
-
-**Response** (Database Down - HTTP 503):
-```json
-{
-  "status": "degraded",
-  "database": "disconnected",
-  "timestamp": "2025-03-29T10:15:32Z"
-}
-```
-
-**Use Cases**:
-- Kubernetes liveness probes
-- Monitoring dashboards
-- CI/CD deployment verification
-- Load balancer health checks
-
-### Root Endpoint
-**Endpoint**: `GET /`
-
-**Response**:
-```json
-{
-  "message": "CrackDSA API running"
-}
-```
+**Key endpoints**:
+- `GET /health` - Health check (public)
+- `GET /api/v1/auth/me` - Get current user (protected)
+- `POST /api/v1/auth/logout` - Logout (optional auth)
+- `GET /api/v1/auth/token-status` - Check auth status (optional auth)
+- `POST /api/v1/roadmap/generate` - Generate roadmap (optional auth)
 
 ## Protecting Routes with Authentication
 

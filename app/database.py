@@ -42,19 +42,9 @@ def check_database_connection() -> bool:
     """
     try:
         client = get_supabase_client()
-        # Lightweight connection test via auth endpoint
-        # This tests Supabase connectivity without requiring any database tables
         client.auth.get_session()
         logger.info("Database connection verified successfully")
         return True
     except Exception as e:
         logger.error(f"Database connection check failed: {str(e)}")
         return False
-
-# Legacy SQLAlchemy imports for backward compatibility (to be phased out)
-# These are kept commented to avoid import errors in existing code
-# Future refactoring should migrate all code to use Supabase client directly
-# from sqlalchemy import create_engine
-# from sqlalchemy.orm import sessionmaker, declarative_base
-# engine = None
-# Base = None

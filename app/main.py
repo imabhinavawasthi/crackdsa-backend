@@ -46,8 +46,12 @@ app.add_middleware(
 
 from app.routes.roadmap_routes import router as roadmap_router
 from app.routes.auth_routes import router as auth_router
+from app.routes.test_routes.auth import router as test_auth_router
+from app.routes.test_routes.rbac import router as test_rbac_router
 app.include_router(roadmap_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(test_auth_router)
+app.include_router(test_rbac_router)
 
 @app.on_event("startup")
 def on_startup():
