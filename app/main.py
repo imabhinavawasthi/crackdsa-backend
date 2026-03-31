@@ -18,11 +18,27 @@ app = FastAPI(
     version="0.1.0",
 )
 
+import os
+
 # Add CORS middleware for OAuth flow
 # In production, restrict origins to deployed frontend URL
+allowed_origins = [
+    "http://localhost:3000", 
+    "http://localhost:3001", 
+    "http://127.0.0.1:3000"
+]
+
+# Add specific FRONTEND_URL if defined in environment
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    allowed_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],
+    allow_origins=allowed_origins,
+    # This regex natively allows deployed Vercel/Render frontend URLs to access the API 
+    # while maintaining 'allow_credentials=True'. 
+    allow_origin_regex=r"https://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
