@@ -1,15 +1,16 @@
 from fastapi import HTTPException
+from typing import Optional
 from app.models.user_preferences import UserPreferences
 from app.models.roadmap import RoadmapResponse
 from app.services.roadmap_service import create_roadmap
 
-async def generate_roadmap_handler(prefs: UserPreferences) -> RoadmapResponse:
+async def generate_roadmap_handler(prefs: UserPreferences, token: Optional[str] = None) -> RoadmapResponse:
     """
     Controller logic to handle generating a roadmap.
-    It catches domain exceptions and converts them to HTTP errors.
+    Supports JWT token for user-specific RLS.
     """
     try:
-        return await create_roadmap(prefs)
+        return await create_roadmap(prefs, token=token)
     except ValueError as e:
         # Client input errors from validation
         raise HTTPException(status_code=400, detail=str(e))

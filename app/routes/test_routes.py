@@ -6,7 +6,7 @@ These are example routes showing how to use the authentication dependencies.
 
 from fastapi import APIRouter, Depends
 from typing import Dict, Any
-from app.dependencies import get_current_user, get_current_user_optional
+from app.dependencies import get_current_user, get_current_user_optional, get_current_user_with_token, get_token
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,12 +21,6 @@ router = APIRouter(
 async def test_public():
     """
     Public endpoint - No authentication required.
-    
-    Returns:
-        dict: A simple message
-        
-    Example:
-        curl http://localhost:8000/api/v1/test/public
     """
     return {
         "message": "This is a public endpoint",
@@ -36,52 +30,19 @@ async def test_public():
 
 
 @router.get("/authenticated")
-async def test_authenticated(user: Dict[str, Any] = Depends(get_current_user)):
+async def test_authenticated(data: Dict[str, Any] = Depends(get_current_user_with_token)):
     """
     Protected endpoint - Requires valid Bearer token.
-    
-    Returns user data from the request.
-    
-    Args:
-        user: Current authenticated user (injected via Depends)
-    
-    Returns:
-        dict: User data from Supabase
-        
-    Example:
-        curl -H "Authorization: Bearer <your_token>" http://localhost:8000/api/v1/test/authenticated
-        
-    Response (HTTP 200):
-        {
-            "message": "Hello! You are authenticated",
-            "requires_auth": true,
-            "user": {
-                "id": "96718f5f-3083-467f-8e45-980b5a6db8d1",
-                "email": "user@example.com",
-                "full_name": "John Doe",
-                "avatar_url": "https://...",
-                "email_verified": true,
-                "phone": "+1234567890",
-                "provider": "google"
-            }
-        }
-        
-    Error (HTTP 401 - No token):
-        {
-            "detail": "No authentication token provided"
-        }
-        
-    Error (HTTP 401 - Invalid token):
-        {
-            "detail": "Invalid or expired token"
-        }
+    Now captures the token for RLS demonstration.
     """
+    user = data["user"]
     logger.info(f"Authenticated test endpoint accessed by user: {user['email']}")
     
     return {
         "message": f"Hello {user['full_name']}! You are authenticated",
         "requires_auth": True,
-        "user": user
+        "user": user,
+        "token_present": data["token"] is not None
     }
 
 

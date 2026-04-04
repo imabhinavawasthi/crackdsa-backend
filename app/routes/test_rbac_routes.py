@@ -8,13 +8,14 @@ Usage examples:
 """
 
 from fastapi import APIRouter, Depends
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from app.dependencies import (
+    get_current_token,
     get_current_user,
     get_current_user_optional,
-    get_current_user_with_roles,
-    require_role,
-    require_any_role,
+    get_current_user_with_token,
+    require_role_with_token,
+    require_any_role_with_token
 )
 
 router = APIRouter(prefix="/api/v1/test-rbac", tags=["RBAC Tests"])
@@ -29,113 +30,107 @@ async def public_endpoint():
 
 # Authenticated endpoint - any authenticated user
 @router.get("/authenticated")
-async def authenticated_endpoint(user: Dict[str, Any] = Depends(get_current_user)):
-    """Authenticated endpoint, requires valid token."""
+async def authenticated_endpoint(data: Dict[str, Any] = Depends(get_current_user_with_token)):
+    """Authenticated endpoint, requires valid token. Returns both user and token."""
+    user = data["user"]
     return {
         "message": f"Hello {user['full_name'] or user['email']}",
         "user_id": user['id'],
         "email": user['email'],
+        "token_present": data["token"] is not None
     }
 
 
 # Get current user with roles
 @router.get("/me-with-roles")
 async def get_user_with_roles(
-    user: Dict[str, Any] = Depends(get_current_user_with_roles)
+    data: Dict[str, Any] = Depends(get_current_user_with_token)
 ):
-    """Get current user with their assigned roles."""
+    """Get current user with their assigned roles and the JWT."""
+    user = data["user"]
+    from app.dependencies import _get_user_roles # Local import for testing
+    roles = _get_user_roles(user['email'])
     return {
         "user_id": user['id'],
         "email": user['email'],
         "full_name": user['full_name'],
-        "roles": user.get('roles', []),
+        "roles": roles,
+        "token_present": data["token"] is not None
     }
 
 
 # Admin-only endpoint
 @router.get("/admin-only")
-async def admin_only(user: Dict[str, Any] = Depends(require_role("admin"))):
-    """Admin-only endpoint. Returns 403 if user doesn't have admin role."""
+async def admin_only(auth_data: Dict[str, Any] = Depends(require_role_with_token("admin"))):
+    """Admin-only endpoint. Requires 'admin' role. Passes token for RLS."""
+    user = auth_data["user"]
     return {
         "message": "Admin access granted",
         "user_email": user['email'],
         "roles": user['roles'],
+        "token_present": auth_data["token"] is not None
     }
 
 
 # Support team-only endpoint
 @router.get("/support-only")
-async def support_only(user: Dict[str, Any] = Depends(require_role("support_team"))):
-    """Support team-only endpoint. Returns 403 if user doesn't have support_team role."""
+async def support_only(auth_data: Dict[str, Any] = Depends(require_role_with_token("support_team"))):
+    """Support team-only endpoint. Requires 'support_team' role."""
+    user = auth_data["user"]
     return {
         "message": "Support team access granted",
         "user_email": user['email'],
-        "roles": user['roles'],
+        "roles": user['roles']
     }
 
 
 # Moderator-only endpoint
 @router.get("/moderator-only")
-async def moderator_only(user: Dict[str, Any] = Depends(require_role("moderator"))):
-    """Moderator-only endpoint. Returns 403 if user doesn't have moderator role."""
+async def moderator_only(auth_data: Dict[str, Any] = Depends(require_role_with_token("moderator"))):
+    """Moderator-only endpoint. Requires 'moderator' role."""
+    user = auth_data["user"]
     return {
         "message": "Moderator access granted",
         "user_email": user['email'],
-        "roles": user['roles'],
+        "roles": user['roles']
     }
 
 
-# Admin or Moderator endpoint (using require_any_role)
+# Admin or Moderator endpoint (using require_any_role_with_token)
 @router.get("/admin-or-moderator")
 async def admin_or_moderator(
-    user: Dict[str, Any] = Depends(require_any_role(["admin", "moderator"]))
+    auth_data: Dict[str, Any] = Depends(require_any_role_with_token(["admin", "moderator"]))
 ):
     """Endpoint that requires either admin or moderator role."""
+    user = auth_data["user"]
     return {
         "message": "Admin or Moderator access granted",
         "user_email": user['email'],
-        "roles": user['roles'],
+        "roles": user['roles']
     }
 
 
 # Admin or Support Team endpoint
 @router.get("/admin-or-support")
 async def admin_or_support(
-    user: Dict[str, Any] = Depends(require_any_role(["admin", "support_team"]))
+    auth_data: Dict[str, Any] = Depends(require_any_role_with_token(["admin", "support_team"]))
 ):
     """Endpoint that requires either admin or support_team role."""
+    user = auth_data["user"]
     return {
         "message": "Admin or Support Team access granted",
         "user_email": user['email'],
-        "roles": user['roles'],
-    }
-
-
-# Custom role requirement (example with dynamic role)
-@router.get("/custom-role/{role_name}")
-async def custom_role_endpoint(
-    role_name: str,
-    user: Dict[str, Any] = Depends(get_current_user)
-):
-    """Example: Check arbitrary role requirement (demonstrates require_role factory)."""
-    # If you want to require a custom role dynamically, create the dependency first
-    async def require_custom(u: Dict[str, Any] = Depends(require_role(role_name))):
-        return u
-    
-    # This would need to be called separately in production
-    return {
-        "message": f"To access {role_name}-only content, use require_role('{role_name}')",
-        "requested_role": role_name,
-        "user_email": user['email'],
+        "roles": user['roles']
     }
 
 
 # Optional auth with role info (if authenticated)
 @router.get("/optional-with-roles")
-async def optional_auth_with_roles(user: Dict[str, Any] = Depends(get_current_user_optional)):
+async def optional_auth_with_roles(user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)):
     """Optional auth endpoint that shows roles if user is authenticated."""
     if user:
-        roles = user.get('roles', [])
+        from app.dependencies import _get_user_roles # Local import for testing
+        roles = _get_user_roles(user['email'])
         return {
             "authenticated": True,
             "user_email": user['email'],

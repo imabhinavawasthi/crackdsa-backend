@@ -139,6 +139,28 @@ async def get_current_user_with_roles(
     return user
 
 
+async def get_token(
+    supabase_token: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None)
+) -> Optional[str]:
+    """Dependency to extract the raw Authentication token."""
+    return _extract_token_from_header(supabase_token, authorization)
+
+# Alias for backward compatibility or different naming preference
+get_current_token = get_token
+
+
+async def get_current_user_with_token(
+    user: Dict[str, Any] = Depends(get_current_user),
+    token: str = Depends(get_token)
+) -> Dict[str, Any]:
+    """Get the current authenticated user and return both user data and the token."""
+    if not token:
+        raise HTTPException(status_code=401, detail="No authentication token provided")
+    
+    return {"user": user, "token": token}
+
+
 def require_role(required_role: str) -> Callable:
     """
     Create a dependency that requires a specific role.
@@ -166,6 +188,42 @@ def require_role(required_role: str) -> Callable:
         
         user['roles'] = roles
         return user
+    
+    return dependency
+
+
+def require_role_with_token(required_role: str) -> Callable:
+    """Dependency that requires a role AND returns the token for RLS use."""
+    async def dependency(
+        data: Dict[str, Any] = Depends(get_current_user_with_token)
+    ) -> Dict[str, Any]:
+        user = data["user"]
+        token = data["token"]
+        
+        roles = _get_user_roles(user['email'])
+        if required_role not in roles:
+            raise HTTPException(status_code=403, detail=f"Requires {required_role} role")
+        
+        user['roles'] = roles
+        return {"user": user, "token": token}
+    
+    return dependency
+
+
+def require_any_role_with_token(required_roles: List[str]) -> Callable:
+    """Dependency that requires any of the roles AND returns the token for RLS use."""
+    async def dependency(
+        data: Dict[str, Any] = Depends(get_current_user_with_token)
+    ) -> Dict[str, Any]:
+        user = data["user"]
+        token = data["token"]
+        
+        user_roles = _get_user_roles(user['email'])
+        if not any(role in user_roles for role in required_roles):
+            raise HTTPException(status_code=403, detail=f"Requires one of {required_roles} roles")
+        
+        user['roles'] = user_roles
+        return {"user": user, "token": token}
     
     return dependency
 

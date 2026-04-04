@@ -7,27 +7,40 @@ logger = logging.getLogger(__name__)
 # Supabase Client Configuration
 _supabase_client: Client | None = None
 
-def get_supabase_client() -> Client:
+def get_supabase_client(jwt_token: str = None) -> Client:
     """
-    Get or initialize the Supabase client.
+    Get or initialize a Supabase client.
+    
+    If jwt_token is provided, returns a NEW client instance scoped to that user.
+    This ensures that Supabase Row-Level Security (RLS) is correctly enforced
+    for the specific authenticated user.
     
     Returns:
         Client: Supabase client instance
-        
-    Raises:
-        ValueError: If SUPABASE_URL or SUPABASE_KEY are not configured
     """
-    global _supabase_client
-    
-    if _supabase_client is not None:
-        return _supabase_client
-    
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         raise ValueError(
             "Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY environment variables."
         )
+
+    # 1. Scoped User Client (RLS-enabled)
+    # Uses the Anon Key + User JWT
+    if jwt_token:
+        # Create a new client instance for the specific request context
+        # We use the ANON_KEY (settings.SUPABASE_KEY) for RLS
+        client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        client.postgrest.auth(jwt_token)
+        return client
+
+    # 2. Administrative/Global Client (RLS-bypass)
+    # Uses the Service Role Key for background/admin tasks
+    global _supabase_client
+    if _supabase_client is not None:
+        return _supabase_client
     
-    _supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    # Preferred: Use Service Role Key for admin operations if available
+    admin_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
+    _supabase_client = create_client(settings.SUPABASE_URL, admin_key)
     return _supabase_client
 
 def check_database_connection() -> bool:
