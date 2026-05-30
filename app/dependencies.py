@@ -269,3 +269,15 @@ def require_any_role(required_roles: List[str]) -> Callable:
 #   moderator: Depends(require_role("moderator"))
 #   custom_role: Depends(require_role("custom_role"))
 
+
+# ============ CONVENIENCE FUNCTIONS ============
+
+# Admin role verification
+verify_admin_token = require_role("admin")
+
+# Moderator role verification
+verify_moderator_token = require_role("moderator")
+
+# Support team role verification
+verify_support_token = require_role("support_team")
+

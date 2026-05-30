@@ -48,6 +48,7 @@ from app.routes.roadmap_routes import router as roadmap_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.dsa_sheet_routes import public_router, admin_router
 from app.routes.course_routes import router as course_router
+from app.routes.instructor_routes import router as instructor_router
 from app.routes.video_lecture_routes import public_router as video_public_router, admin_router as video_admin_router
 from app.routes.practice_problem_routes import public_router as problem_public_router, admin_router as problem_admin_router
 from app.routes.article_routes import public_router as article_public_router, admin_router as article_admin_router
@@ -58,6 +59,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(public_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(course_router, prefix="/api/v1")
+app.include_router(instructor_router, prefix="/api/v1")
 app.include_router(video_public_router, prefix="/api/v1")
 app.include_router(video_admin_router, prefix="/api/v1")
 app.include_router(problem_public_router, prefix="/api/v1")
