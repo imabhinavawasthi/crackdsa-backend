@@ -43,6 +43,7 @@ def _build_user_response(user: Any) -> Dict[str, Any]:
         "email_verified": user_metadata.get('email_verified', False),
         "phone": user.phone or '',
         "provider": app_metadata.get('provider'),
+        "roles": _get_user_roles(user.email),
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_sign_in_at": user.last_sign_in_at.isoformat() if user.last_sign_in_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
