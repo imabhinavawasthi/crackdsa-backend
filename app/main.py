@@ -47,25 +47,29 @@ app.add_middleware(
 from app.routes.roadmap_routes import router as roadmap_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.dsa_sheet_routes import public_router, admin_router
-from app.routes.course_routes import router as course_router
-from app.routes.instructor_routes import router as instructor_router
+from app.routes.course_routes import public_router as course_public_router, admin_router as course_admin_router
+from app.routes.instructor_routes import public_router as instructor_public_router, admin_router as instructor_admin_router
 from app.routes.video_lecture_routes import public_router as video_public_router, admin_router as video_admin_router
 from app.routes.practice_problem_routes import public_router as problem_public_router, admin_router as problem_admin_router
 from app.routes.article_routes import public_router as article_public_router, admin_router as article_admin_router
+from app.routes.user_asset_state_routes import router as user_asset_state_router
 from app.routes.test_routes.auth import router as test_auth_router
 from app.routes.test_routes.rbac import router as test_rbac_router
 app.include_router(roadmap_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(public_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
-app.include_router(course_router, prefix="/api/v1")
-app.include_router(instructor_router, prefix="/api/v1")
+app.include_router(course_public_router, prefix="/api/v1")
+app.include_router(course_admin_router, prefix="/api/v1")
+app.include_router(instructor_public_router, prefix="/api/v1")
+app.include_router(instructor_admin_router, prefix="/api/v1")
 app.include_router(video_public_router, prefix="/api/v1")
 app.include_router(video_admin_router, prefix="/api/v1")
 app.include_router(problem_public_router, prefix="/api/v1")
 app.include_router(problem_admin_router, prefix="/api/v1")
 app.include_router(article_public_router, prefix="/api/v1")
 app.include_router(article_admin_router, prefix="/api/v1")
+app.include_router(user_asset_state_router, prefix="/api/v1")
 app.include_router(test_auth_router)
 app.include_router(test_rbac_router)
 

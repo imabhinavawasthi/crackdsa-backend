@@ -8,12 +8,6 @@ class CourseCategoryEnum(str, Enum):
     SYSTEM_DESIGN = "system-design"
     ADVANCED = "advanced"
 
-class CourseDifficultyEnum(str, Enum):
-    BEGINNER = "Beginner"
-    INTERMEDIATE = "Intermediate"
-    ADVANCED = "Advanced"
-    ALL_LEVELS = "All Levels"
-
 class CourseStatusEnum(str, Enum):
     ACTIVE = "active"
     UPCOMING = "upcoming"
@@ -59,24 +53,66 @@ class CourseSection(BaseModel):
         from_attributes = True
 
 class CourseResponseSchema(BaseModel):
-    id: str
+    id: str                                             # UUID string
+    slug: str                                           # SEO slug (e.g. 'dsa-bootcamp-recordings')
     title: str
     description: str
     category: CourseCategoryEnum
-    difficulty: CourseDifficultyEnum
-    duration_weeks: int
-    total_problems: int
-    total_projects: int
-    instructor: InstructorSchema
-    tags: List[str]
-    syllabus: List[str]
-    is_pro: bool
-    is_popular: bool
+    
+    # Support list of co-instructors
+    instructors: List[InstructorSchema] = []
+    instructor_ids: List[str] = []
+    
+    tags: List[str] = []
+    is_pro: bool = True
+    is_popular: bool = False
     status: CourseStatusEnum
     price: int
     original_price: int
-    sections: Optional[List[CourseSection]] = None
+    
+    # Dynamic counts populated by backend at runtime
+    total_problems: int = 0
+    total_articles: int = 0
+    total_videos: int = 0
+    
+    # Embedded detailed syllabus structure
+    curriculum: List[CourseSection] = []
+    
+    # Extensible configuration bucket
+    metadata: dict = {}
 
     class Config:
         from_attributes = True
+
+class CourseCreateSchema(BaseModel):
+    slug: str                                           # SEO-friendly URL slug key
+    title: str
+    description: str
+    category: CourseCategoryEnum
+    id: Optional[str] = None                            # UUID string (optional, auto-generated)
+    instructor_ids: List[str] = []                      # Array of instructor UUIDs
+    tags: List[str] = []
+    is_pro: bool = True
+    is_popular: bool = False
+    price: int
+    original_price: int
+    curriculum: List[CourseSection] = []
+    status: CourseStatusEnum = CourseStatusEnum.DRAFT
+    metadata: Optional[dict] = None
+
+class CourseUpdateSchema(BaseModel):
+    slug: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[CourseCategoryEnum] = None
+    instructor_ids: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    is_pro: Optional[bool] = None
+    is_popular: Optional[bool] = None
+    price: Optional[int] = None
+    original_price: Optional[int] = None
+    curriculum: Optional[List[CourseSection]] = None
+    status: Optional[CourseStatusEnum] = None
+    metadata: Optional[dict] = None
+
 

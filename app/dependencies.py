@@ -30,7 +30,7 @@ def _extract_token_from_header(
     return token
 
 
-def _build_user_response(user: Any) -> Dict[str, Any]:
+def build_user_response(user: Any) -> Dict[str, Any]:
     """Build clean user data dict from Supabase User object."""
     user_metadata = user.user_metadata or {}
     app_metadata = user.app_metadata or {}
@@ -83,7 +83,7 @@ async def get_current_user(
             user = response.user if hasattr(response, 'user') else response
             
             logger.info(f"User authenticated: {user.email}")
-            return _build_user_response(user)
+            return build_user_response(user)
             
         except Exception as e:
             logger.error(f"Token verification failed: {str(e)}")
@@ -120,7 +120,7 @@ async def get_current_user_optional(
             user = response.user if hasattr(response, 'user') else response
             
             logger.info(f"Optional auth - User present: {user.email}")
-            return _build_user_response(user)
+            return build_user_response(user)
             
         except Exception as e:
             logger.info(f"Optional auth - Invalid token: {str(e)}")

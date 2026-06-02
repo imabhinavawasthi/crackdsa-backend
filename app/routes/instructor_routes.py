@@ -12,14 +12,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
+# --- Public Router ---
+public_router = APIRouter(
     prefix="/instructors",
-    tags=["Instructors"]
+    tags=["Instructors (Public)"]
 )
+
+# --- Admin Router ---
+admin_router = APIRouter(
+    prefix="/admin/instructors",
+    tags=["Instructors (Admin)"]
+)
+
 
 # ============ PUBLIC ENDPOINTS ============
 
-@router.get("/", response_model=InstructorListResponseSchema)
+@public_router.get("", response_model=InstructorListResponseSchema)
+@public_router.get("/", response_model=InstructorListResponseSchema, include_in_schema=False)
 def list_instructors(
     limit: int = Query(20, ge=1, le=100, description="Number of instructors to fetch"),
     offset: int = Query(0, ge=0, description="Number of instructors to skip"),
@@ -44,7 +53,8 @@ def list_instructors(
         )
 
 
-@router.get("/search", response_model=list[InstructorResponseSchema])
+@public_router.get("/search", response_model=list[InstructorResponseSchema])
+@public_router.get("/search/", response_model=list[InstructorResponseSchema], include_in_schema=False)
 def search_instructors(
     q: str = Query(..., min_length=1, description="Search query (name or role)"),
     limit: int = Query(10, ge=1, le=50, description="Maximum results"),
@@ -69,7 +79,8 @@ def search_instructors(
         )
 
 
-@router.get("/{instructor_id}", response_model=InstructorResponseSchema)
+@public_router.get("/{instructor_id}", response_model=InstructorResponseSchema)
+@public_router.get("/{instructor_id}/", response_model=InstructorResponseSchema, include_in_schema=False)
 def get_instructor(instructor_id: UUID):
     """
     Get a specific instructor by ID (public endpoint).
@@ -92,7 +103,8 @@ def get_instructor(instructor_id: UUID):
 
 # ============ ADMIN ENDPOINTS ============
 
-@router.post("/", response_model=InstructorResponseSchema, status_code=status.HTTP_201_CREATED)
+@admin_router.post("", response_model=InstructorResponseSchema, status_code=status.HTTP_201_CREATED)
+@admin_router.post("/", response_model=InstructorResponseSchema, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_instructor(
     data: InstructorCreateSchema,
     admin_user = Depends(verify_admin_token),
@@ -118,7 +130,8 @@ def create_instructor(
         )
 
 
-@router.patch("/{instructor_id}", response_model=InstructorResponseSchema)
+@admin_router.put("/{instructor_id}", response_model=InstructorResponseSchema)
+@admin_router.put("/{instructor_id}/", response_model=InstructorResponseSchema, include_in_schema=False)
 def update_instructor(
     instructor_id: UUID,
     data: InstructorUpdateSchema,
@@ -148,7 +161,8 @@ def update_instructor(
         )
 
 
-@router.delete("/{instructor_id}", status_code=status.HTTP_204_NO_CONTENT)
+@admin_router.delete("/{instructor_id}", status_code=status.HTTP_204_NO_CONTENT)
+@admin_router.delete("/{instructor_id}/", status_code=status.HTTP_204_NO_CONTENT, include_in_schema=False)
 def delete_instructor(
     instructor_id: UUID,
     hard_delete: bool = Query(False, description="If true, permanently delete; if false, soft delete"),
@@ -179,7 +193,8 @@ def delete_instructor(
         )
 
 
-@router.get("/admin/all", response_model=InstructorListResponseSchema)
+@admin_router.get("", response_model=InstructorListResponseSchema)
+@admin_router.get("/", response_model=InstructorListResponseSchema, include_in_schema=False)
 def admin_list_all_instructors(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -211,4 +226,24 @@ def admin_list_all_instructors(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch instructors"
+        )
+
+
+@admin_router.get("/{instructor_id}", response_model=InstructorResponseSchema)
+@admin_router.get("/{instructor_id}/", response_model=InstructorResponseSchema, include_in_schema=False)
+def get_instructor_admin(
+    instructor_id: UUID,
+    admin_user = Depends(verify_admin_token),
+):
+    """
+    Get a specific instructor by ID as an admin (can fetch inactive/soft-deleted ones).
+    """
+    try:
+        instructor = InstructorService.get_instructor_by_id(instructor_id)
+        return instructor
+    except Exception as e:
+        logger.error(f"Error fetching instructor {instructor_id} for admin: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Instructor with id {instructor_id} not found"
         )

@@ -1,214 +1,166 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Query, status
 from typing import List
-from app.schemas.course import CourseResponseSchema, CourseCategoryEnum, CourseDifficultyEnum, CourseStatusEnum
+from app.schemas.course import (
+    CourseResponseSchema,
+    CourseCreateSchema,
+    CourseUpdateSchema,
+)
+from app.services.course_service import CourseService
+from app.dependencies import verify_admin_token
+import logging
 
-router = APIRouter(
+logger = logging.getLogger(__name__)
+
+# --- Public Router ---
+# General student access: only list active courses and retrieve by ID/slug
+public_router = APIRouter(
     prefix="/courses",
-    tags=["Courses"]
+    tags=["Courses (Public)"]
 )
 
-# Database with only the single high-value sellable premium course
-COURSES_DATABASE = [
-    {
-        "id": "dsa-bootcamp-recordings",
-        "title": "Ultimate DSA Revision: 3-Month Live Bootcamp recordings",
-        "description": "Get lifetime access to the complete recordings of our exclusive 3-month Live DSA Bootcamp. Covers the entire DSA syllabus across 50 intensive interactive sessions, curated topic coding sheets, and conceptual SDE revision articles.",
-        "category": CourseCategoryEnum.CORE_DSA,
-        "difficulty": CourseDifficultyEnum.ALL_LEVELS,
-        "duration_weeks": 12,
-        "total_problems": 150,
-        "total_projects": 0,
-        "instructor": {
-            "name": "Abhinav Awasthi",
-            "role": "Founder, CrackDSA",
-            "company": "Ex-Google SDE",
-            "color": "from-brand-500 to-blue-light-400"
-        },
-        "tags": ["50+ Recordings", "Entire Syllabus", "SDE Revision Articles", "Lifetime Access"],
-        "syllabus": [
-            "Session 1-10: Language Basics, Big-O Analysis & Array Patterns",
-            "Session 11-25: Core Patterns (Two Pointers, Sliding Window, Lists & Stacks)",
-            "Session 26-40: Advanced Structures (Binary Trees, Heaps, BSTs & Sorting)",
-            "Session 41-50: Advanced Mastery (Dynamic Programming, Graph DFS/BFS & Interview Prep)"
-        ],
-        "is_pro": True,
-        "is_popular": True,
-        "status": CourseStatusEnum.ACTIVE,
-        "price": 999,
-        "original_price": 2999,
-        "sections": [
-            {
-                "id": "section-1",
-                "title": "Section 1: Language Basics, Big-O Analysis & Array Patterns",
-                "description": "Foundations of programming languages, execution memory layout, complexity analysis, and warm-up array operations.",
-                "items": [
-                    {
-                        "id": "item-1",
-                        "title": "1.1 Language Basics & Memory Layout",
-                        "type": "video",
-                        "asset_id": "BasicsMemoryLayoutYouTubeId",
-                        "is_free": True,
-                        "duration_label": "24:15"
-                    },
-                    {
-                        "id": "item-2",
-                        "title": "1.2 Analysis of Algorithms & Big-O notation",
-                        "type": "article",
-                        "asset_id": "analysis-of-algorithms-big-o",
-                        "is_free": True,
-                        "duration_label": "8 min read"
-                    },
-                    {
-                        "id": "item-3",
-                        "title": "1.3 Reverse an Array",
-                        "type": "problem",
-                        "asset_id": "reverse-an-array",
-                        "is_free": False,
-                        "duration_label": "Easy"
-                    },
-                    {
-                        "id": "item-4",
-                        "title": "1.4 Find Minimum and Maximum in Array",
-                        "type": "problem",
-                        "asset_id": "find-min-max-array",
-                        "is_free": False,
-                        "duration_label": "Easy"
-                    }
-                ]
-            },
-            {
-                "id": "section-2",
-                "title": "Section 2: Core Patterns (Two Pointers & Sliding Window)",
-                "description": "Master two of the most frequently asked linear scan patterns used in high-volume production interviews.",
-                "subsections": [
-                    {
-                        "id": "subsection-2-1",
-                        "title": "Subsection 2.1: Two Pointers Pattern",
-                        "description": "Linear scans utilizing low and high boundary pointers.",
-                        "items": [
-                            {
-                                "id": "item-5",
-                                "title": "2.1 Two Pointers Pattern Deep-Dive",
-                                "type": "video",
-                                "asset_id": "TwoPointersPatternYouTubeId",
-                                "is_free": False,
-                                "duration_label": "42:10"
-                            },
-                            {
-                                "id": "item-6",
-                                "title": "2.2 Valid Palindrome",
-                                "type": "problem",
-                                "asset_id": "valid-palindrome",
-                                "is_free": False,
-                                "duration_label": "Easy"
-                            }
-                        ]
-                    },
-                    {
-                        "id": "subsection-2-2",
-                        "title": "Subsection 2.2: Sliding Window Pattern",
-                        "description": "Subarray expansion and contraction optimization scans.",
-                        "items": [
-                            {
-                                "id": "item-7",
-                                "title": "2.3 Sliding Window Core Patterns & Guidelines",
-                                "type": "article",
-                                "asset_id": "sliding-window-guide",
-                                "is_free": False,
-                                "duration_label": "12 min read"
-                            },
-                            {
-                                "id": "item-8",
-                                "title": "2.4 Maximum Subarray (Kadane's Algorithm)",
-                                "type": "problem",
-                                "asset_id": "max-subarray",
-                                "is_free": False,
-                                "duration_label": "Medium"
-                            }
-                        ]
-                    }
-                ]
-            },
-            {
-                "id": "section-3",
-                "title": "Section 3: Advanced Structures (Binary Trees, Heaps & BSTs)",
-                "description": "Understand tree-structured traversal patterns, breadth-first vs depth-first search, and heap priorities.",
-                "items": [
-                    {
-                        "id": "item-9",
-                        "title": "3.1 Binary Tree Traversals & Depth Strategies",
-                        "type": "video",
-                        "asset_id": "BinaryTreeStrategyYouTubeId",
-                        "is_free": False,
-                        "duration_label": "55:30"
-                    },
-                    {
-                        "id": "item-10",
-                        "title": "3.2 Maximum Depth of Binary Tree",
-                        "type": "problem",
-                        "asset_id": "max-depth-tree",
-                        "is_free": False,
-                        "duration_label": "Easy"
-                    },
-                    {
-                        "id": "item-11",
-                        "title": "3.3 Invert Binary Tree",
-                        "type": "problem",
-                        "asset_id": "invert-binary-tree",
-                        "is_free": False,
-                        "duration_label": "Easy"
-                    }
-                ]
-            },
-            {
-                "id": "section-4",
-                "title": "Section 4: Advanced Mastery (Dynamic Programming & Interview Prep)",
-                "description": "Conquer dynamic programming by using memoization and tabulation. Finish with top strategic FAANG interview prep checklists.",
-                "items": [
-                    {
-                        "id": "item-12",
-                        "title": "4.1 Introduction to DP: Memoization vs Tabulation",
-                        "type": "video",
-                        "asset_id": "DPIntroductionYouTubeId",
-                        "is_free": False,
-                        "duration_label": "1:05:40"
-                    },
-                    {
-                        "id": "item-13",
-                        "title": "4.2 Climbing Stairs (DP)",
-                        "type": "problem",
-                        "asset_id": "climbing-stairs",
-                        "is_free": False,
-                        "duration_label": "Easy"
-                    },
-                    {
-                        "id": "item-14",
-                        "title": "4.3 Ultimate SDE Interview Prep Cheat Sheet",
-                        "type": "article",
-                        "asset_id": "sde-cheat-sheet",
-                        "is_free": True,
-                        "duration_label": "15 min read"
-                    }
-                ]
-            }
-        ]
-    }
-]
-
-@router.get("/", response_model=List[CourseResponseSchema])
-def list_courses():
+@public_router.get("", response_model=List[CourseResponseSchema])
+@public_router.get("/", response_model=List[CourseResponseSchema], include_in_schema=False)
+def list_courses_public():
     """
     Fetch all active SDE preparation courses from the CrackDSA Academy catalog.
     """
-    return [course for course in COURSES_DATABASE if course["status"] == CourseStatusEnum.ACTIVE]
+    try:
+        return CourseService.list_courses(all_status=False)
+    except Exception as e:
+        logger.error(f"Error fetching academy courses: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch course catalog"
+        )
 
-@router.get("/{course_id}", response_model=CourseResponseSchema)
-def get_course(course_id: str):
+@public_router.get("/{course_id}", response_model=CourseResponseSchema)
+@public_router.get("/{course_id}/", response_model=CourseResponseSchema, include_in_schema=False)
+def get_course_public(course_id: str):
     """
-    Fetch a specific course by its unique ID, including detailed syllabus and sections.
+    Fetch a specific course by its unique ID/slug.
     """
-    for course in COURSES_DATABASE:
-        if course["id"] == course_id and course["status"] == CourseStatusEnum.ACTIVE:
-            return course
-    raise HTTPException(status_code=404, detail="Course not found")
+    try:
+        return CourseService.get_course_by_id(course_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error fetching course details for '{course_id}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch course details"
+        )
 
+
+# --- Admin Router ---
+# Full CRUD control: reserved for SDE admins, includes draft/upcoming listings
+admin_router = APIRouter(
+    prefix="/admin/courses",
+    tags=["Courses (Admin)"]
+)
+
+@admin_router.get("", response_model=List[CourseResponseSchema])
+@admin_router.get("/", response_model=List[CourseResponseSchema], include_in_schema=False)
+def list_courses_admin(admin_user = Depends(verify_admin_token)):
+    """
+    List all active + draft + upcoming courses for administrative audit.
+    Requires 'admin' role.
+    """
+    try:
+        return CourseService.list_courses(all_status=True)
+    except Exception as e:
+        logger.error(f"Error listing admin course catalog: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch course catalog"
+        )
+
+@admin_router.get("/{course_id}", response_model=CourseResponseSchema)
+@admin_router.get("/{course_id}/", response_model=CourseResponseSchema, include_in_schema=False)
+def get_course_admin(course_id: str, admin_user = Depends(verify_admin_token)):
+    """
+    Fetch any course by ID/slug (even if draft/upcoming).
+    Requires 'admin' role.
+    """
+    try:
+        return CourseService.get_course_by_id(course_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error fetching course details for '{course_id}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch course details"
+        )
+
+@admin_router.post("", response_model=CourseResponseSchema, status_code=status.HTTP_201_CREATED)
+@admin_router.post("/", response_model=CourseResponseSchema, status_code=status.HTTP_201_CREATED, include_in_schema=False)
+def create_course_admin(
+    data: CourseCreateSchema,
+    admin_user = Depends(verify_admin_token),
+):
+    """
+    Create a new course listing (Admin only).
+    """
+    try:
+        course = CourseService.create_course(data)
+        logger.info(f"Admin {admin_user['id']} successfully created course: {course.id}")
+        return course
+    except Exception as e:
+        logger.error(f"Error creating course: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create course: {str(e)}"
+        )
+
+@admin_router.put("/{course_id}", response_model=CourseResponseSchema)
+@admin_router.put("/{course_id}/", response_model=CourseResponseSchema, include_in_schema=False)
+def update_course_admin(
+    course_id: str,
+    data: CourseUpdateSchema,
+    admin_user = Depends(verify_admin_token),
+):
+    """
+    Update an existing course's details, tags, co-instructors, or dynamic syllabus JSONB (Admin only).
+    """
+    try:
+        course = CourseService.update_course(course_id, data)
+        logger.info(f"Admin {admin_user['id']} successfully updated course: {course_id}")
+        return course
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error updating course {course_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update course: {str(e)}"
+        )
+
+@admin_router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+@admin_router.delete("/{course_id}/", status_code=status.HTTP_204_NO_CONTENT, include_in_schema=False)
+def delete_course_admin(
+    course_id: str,
+    hard_delete: bool = Query(False, description="If true, permanently delete from DB; if false, soft-delete"),
+    admin_user = Depends(verify_admin_token),
+):
+    """
+    Delete a course listing (Admin only). Defaults to soft-deleting.
+    """
+    try:
+        CourseService.delete_course(course_id, hard_delete=hard_delete)
+        logger.info(f"Admin {admin_user['id']} successfully deleted course: {course_id} (hard={hard_delete})")
+        return None
+    except Exception as e:
+        logger.error(f"Error deleting course {course_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Failed to delete course or course not found: {str(e)}"
+        )
