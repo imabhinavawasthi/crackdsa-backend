@@ -19,6 +19,20 @@ def get_practice_problems(include_inactive: bool = False, token: str = None) -> 
     response = query.order("created_at", desc=True).execute()
     return response.data
 
+def get_practice_problems_basic(include_inactive: bool = False, token: str = None) -> List[dict]:
+    """
+    Fetch only basic details (excluding description, solutions, resources) for practice problems.
+    """
+    client = get_supabase_client(jwt_token=token)
+    cols = "id,slug,title,difficulty,platform,problem_url,attributes,is_active,created_at,updated_at"
+    query = client.table("practice_problems").select(cols)
+    
+    if not include_inactive:
+        query = query.eq("is_active", True)
+        
+    response = query.order("created_at", desc=True).execute()
+    return response.data
+
 def get_practice_problem_by_id(problem_id: UUID, include_inactive: bool = False, token: str = None) -> Optional[dict]:
     """
     Fetch a single practice problem by its UUID.

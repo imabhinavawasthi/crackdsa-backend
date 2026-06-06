@@ -1,6 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends
-from app.schemas.practice_problem import PracticeProblem, PracticeProblemCreate, PracticeProblemUpdate
+from app.schemas.practice_problem import PracticeProblem, PracticeProblemCreate, PracticeProblemUpdate, PracticeProblemBasic
 from app.controllers import practice_problem_controller
 from app.dependencies import require_role_with_token, get_token
 from uuid import UUID
@@ -12,12 +12,12 @@ public_router = APIRouter(
     tags=["Practice Problems (Public)"]
 )
 
-@public_router.get("", response_model=List[PracticeProblem])
+@public_router.get("", response_model=List[PracticeProblemBasic])
 async def list_problems_public(token: Optional[str] = Depends(get_token)):
     """
     List all active practice problems for student discovery.
     """
-    return await practice_problem_controller.list_problems_handler(include_inactive=False, token=token)
+    return await practice_problem_controller.list_problems_basic_handler(include_inactive=False, token=token)
 
 @public_router.get("/{slug_or_id}", response_model=PracticeProblem)
 async def get_problem_public(slug_or_id: str, token: Optional[str] = Depends(get_token)):
@@ -38,13 +38,13 @@ admin_router = APIRouter(
     tags=["Practice Problems (Admin)"]
 )
 
-@admin_router.get("", response_model=List[PracticeProblem])
+@admin_router.get("", response_model=List[PracticeProblemBasic])
 async def list_problems_admin(auth_data: dict = Depends(require_role_with_token("admin"))):
     """
     List all practice problems (active + soft-deleted) for administrative audit.
     Requires 'admin' role.
     """
-    return await practice_problem_controller.list_problems_handler(include_inactive=True, token=auth_data["token"])
+    return await practice_problem_controller.list_problems_basic_handler(include_inactive=True, token=auth_data["token"])
 
 @admin_router.get("/{id}", response_model=PracticeProblem)
 async def get_problem_admin(id: UUID, auth_data: dict = Depends(require_role_with_token("admin"))):

@@ -13,6 +13,15 @@ async def list_problems_handler(include_inactive: bool = False, token: str = Non
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch practice problems: {str(e)}")
 
+async def list_problems_basic_handler(include_inactive: bool = False, token: str = None) -> List[dict]:
+    """
+    Controller handler to list only basic details of practice problems.
+    """
+    try:
+        return practice_problem_service.get_practice_problems_basic(include_inactive=include_inactive, token=token)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch basic practice problems: {str(e)}")
+
 async def get_problem_handler(problem_id: UUID, include_inactive: bool = False, token: str = None) -> dict:
     """
     Controller handler to retrieve a single problem by UUID.

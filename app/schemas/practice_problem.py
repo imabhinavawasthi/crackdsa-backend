@@ -43,3 +43,20 @@ class PracticeProblem(PracticeProblemBase):
 
     class Config:
         from_attributes = True
+
+
+# --- Basic Practice Problem Response Schema (for table listings) ---
+class PracticeProblemBasic(BaseModel):
+    id: UUID
+    slug: str
+    title: str
+    difficulty: str
+    platform: str
+    problem_url: Optional[str] = None
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
