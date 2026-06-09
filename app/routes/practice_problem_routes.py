@@ -19,6 +19,38 @@ async def list_problems_public(token: Optional[str] = Depends(get_token)):
     """
     return await practice_problem_controller.list_problems_basic_handler(include_inactive=False, token=token)
 
+@public_router.get("/topics-summary")
+async def get_topics_summary_route(token: Optional[str] = Depends(get_token)):
+    """
+    Get a summary of all topics with problem counts.
+    """
+    from app.services.practice_problem_service import get_topics_summary
+    return get_topics_summary(token=token)
+
+@public_router.get("/companies-summary")
+async def get_companies_summary_route(token: Optional[str] = Depends(get_token)):
+    """
+    Get a summary of all companies with problem counts.
+    """
+    from app.services.practice_problem_service import get_companies_summary
+    return get_companies_summary(token=token)
+
+@public_router.get("/topics/{topic_slug}", response_model=List[PracticeProblemBasic])
+async def list_problems_by_topic(topic_slug: str, token: Optional[str] = Depends(get_token)):
+    """
+    List active practice problems matching a specific topic tag (slugified).
+    """
+    from app.services.practice_problem_service import get_practice_problems_by_topic
+    return get_practice_problems_by_topic(topic_slug, token=token)
+
+@public_router.get("/companies/{company_slug}", response_model=List[PracticeProblemBasic])
+async def list_problems_by_company(company_slug: str, token: Optional[str] = Depends(get_token)):
+    """
+    List active practice problems matching a specific company tag (slugified).
+    """
+    from app.services.practice_problem_service import get_practice_problems_by_company
+    return get_practice_problems_by_company(company_slug, token=token)
+
 @public_router.get("/{slug_or_id}", response_model=PracticeProblem)
 async def get_problem_public(slug_or_id: str, token: Optional[str] = Depends(get_token)):
     """

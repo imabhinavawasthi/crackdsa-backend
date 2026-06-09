@@ -113,3 +113,117 @@ def soft_delete_practice_problem(problem_id: UUID, token: str = None) -> bool:
         raise HTTPException(status_code=404, detail=f"Practice problem with id {problem_id} not found")
         
     return True
+
+def slugify(text: str) -> str:
+    """
+    Converts text to a URL-friendly slug, matching frontend slugify logic.
+    """
+    import re
+    if not text:
+        return ""
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_-]+', '-', text)
+    return text.strip('-')
+
+def get_practice_problems_by_topic(topic_slug: str, token: str = None) -> List[dict]:
+    """
+    Fetch all active problems matching a specific topic slug.
+    """
+    problems = get_practice_problems_basic(include_inactive=False, token=token)
+    filtered = []
+    for p in problems:
+        tags = p.get("attributes", {}).get("tags", []) or p.get("attributes", {}).get("topicTags", []) or []
+        if any(slugify(t) == topic_slug for t in tags):
+            filtered.append(p)
+    return filtered
+
+def get_practice_problems_by_company(company_slug: str, token: str = None) -> List[dict]:
+    """
+    Fetch all active problems matching a specific company slug.
+    """
+    problems = get_practice_problems_basic(include_inactive=False, token=token)
+    filtered = []
+    for p in problems:
+        companies = p.get("attributes", {}).get("company_tags", []) or p.get("attributes", {}).get("companyTags", []) or []
+        if any(slugify(c) == company_slug for c in companies):
+            filtered.append(p)
+    return filtered
+
+def get_topics_summary(token: str = None) -> List[dict]:
+    """
+    Computes a summary of all topic tags with their active problem counts.
+    """
+    problems = get_practice_problems_basic(include_inactive=False, token=token)
+    topics_map = {}
+    
+    for p in problems:
+        tags = p.get("attributes", {}).get("tags", []) or p.get("attributes", {}).get("topicTags", []) or []
+        diff = p.get("difficulty", "Easy")
+        
+        for t in tags:
+            if not t:
+                continue
+            slug = slugify(t)
+            if not slug:
+                continue
+                
+            if slug not in topics_map:
+                topics_map[slug] = {
+                    "name": t,
+                    "slug": slug,
+                    "count": 0,
+                    "easy_count": 0,
+                    "medium_count": 0,
+                    "hard_count": 0
+                }
+            
+            topics_map[slug]["count"] += 1
+            if diff == "Easy":
+                topics_map[slug]["easy_count"] += 1
+            elif diff == "Medium":
+                topics_map[slug]["medium_count"] += 1
+            elif diff == "Hard":
+                topics_map[slug]["hard_count"] += 1
+                
+    # Sort topics by count descending
+    return sorted(topics_map.values(), key=lambda x: x["count"], reverse=True)
+
+def get_companies_summary(token: str = None) -> List[dict]:
+    """
+    Computes a summary of all company tags with their active problem counts.
+    """
+    problems = get_practice_problems_basic(include_inactive=False, token=token)
+    companies_map = {}
+    
+    for p in problems:
+        companies = p.get("attributes", {}).get("company_tags", []) or p.get("attributes", {}).get("companyTags", []) or []
+        diff = p.get("difficulty", "Easy")
+        
+        for c in companies:
+            if not c:
+                continue
+            slug = slugify(c)
+            if not slug:
+                continue
+                
+            if slug not in companies_map:
+                companies_map[slug] = {
+                    "name": c,
+                    "slug": slug,
+                    "count": 0,
+                    "easy_count": 0,
+                    "medium_count": 0,
+                    "hard_count": 0
+                }
+            
+            companies_map[slug]["count"] += 1
+            if diff == "Easy":
+                companies_map[slug]["easy_count"] += 1
+            elif diff == "Medium":
+                companies_map[slug]["medium_count"] += 1
+            elif diff == "Hard":
+                companies_map[slug]["hard_count"] += 1
+                
+    # Sort companies by count descending
+    return sorted(companies_map.values(), key=lambda x: x["count"], reverse=True)
