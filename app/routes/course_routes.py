@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends, Query, status
 from typing import List
 from app.schemas.course import (
     CourseResponseSchema,
+    CourseSummaryResponseSchema,
+    CourseSection,
     CourseCreateSchema,
     CourseUpdateSchema,
 )
@@ -18,8 +20,8 @@ public_router = APIRouter(
     tags=["Courses (Public)"]
 )
 
-@public_router.get("", response_model=List[CourseResponseSchema])
-@public_router.get("/", response_model=List[CourseResponseSchema], include_in_schema=False)
+@public_router.get("", response_model=List[CourseSummaryResponseSchema])
+@public_router.get("/", response_model=List[CourseSummaryResponseSchema], include_in_schema=False)
 def list_courses_public():
     """
     Fetch all active SDE preparation courses from the CrackDSA Academy catalog.
@@ -33,14 +35,14 @@ def list_courses_public():
             detail="Failed to fetch course catalog"
         )
 
-@public_router.get("/{course_id}", response_model=CourseResponseSchema)
-@public_router.get("/{course_id}/", response_model=CourseResponseSchema, include_in_schema=False)
+@public_router.get("/{course_id}", response_model=CourseSummaryResponseSchema)
+@public_router.get("/{course_id}/", response_model=CourseSummaryResponseSchema, include_in_schema=False)
 def get_course_public(course_id: str):
     """
     Fetch a specific course by its unique ID/slug.
     """
     try:
-        return CourseService.get_course_by_id(course_id)
+        return CourseService.get_course_summary_by_id(course_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -53,7 +55,24 @@ def get_course_public(course_id: str):
             detail="Failed to fetch course details"
         )
 
-
+@public_router.get("/{course_id}/curriculum", response_model=List[CourseSection])
+def get_course_curriculum_public(course_id: str):
+    """
+    Fetch only the full curriculum tree for a specific course by its unique ID/slug.
+    """
+    try:
+        return CourseService.get_course_curriculum(course_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error fetching curriculum details for '{course_id}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch course curriculum"
+        )
 # --- Admin Router ---
 # Full CRUD control: reserved for SDE admins, includes draft/upcoming listings
 admin_router = APIRouter(

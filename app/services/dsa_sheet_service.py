@@ -91,3 +91,34 @@ def soft_delete_sheet(sheet_id: str, token: str = None) -> bool:
         raise HTTPException(status_code=404, detail=f"Sheet with id {sheet_id} not found")
         
     return True
+
+def get_sheet_problems(sheet_id: str, token: str = None) -> List[dict]:
+    """
+    Fetch all practice problems detailed info for a specific DSA sheet.
+    """
+    sheet = get_sheet_by_id(sheet_id, include_inactive=False, token=token)
+    if not sheet:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+        
+    problem_slugs = []
+    sheet_json = sheet.get("sheet_json", {})
+    for topic in sheet_json.get("topics", []):
+        for step in topic.get("steps", []):
+            for prob in step.get("problems", []):
+                if prob.get("problem_id"):
+                    problem_slugs.append(prob["problem_id"])
+                    
+    if not problem_slugs:
+        return []
+        
+    client = get_supabase_client(jwt_token=token)
+    cols = "id,slug,title,difficulty,platform,problem_url,attributes,is_active,created_at,updated_at"
+    
+    # Batch query all slugs.
+    response = client.table("practice_problems") \
+        .select(cols) \
+        .in_("slug", problem_slugs) \
+        .eq("is_active", True) \
+        .execute()
+        
+    return response.data

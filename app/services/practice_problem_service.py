@@ -16,7 +16,7 @@ def get_practice_problems(include_inactive: bool = False, token: str = None) -> 
     if not include_inactive:
         query = query.eq("is_active", True)
         
-    response = query.order("created_at", desc=True).execute()
+    response = query.order("created_at", desc=False).execute()
     return response.data
 
 def get_practice_problems_basic(include_inactive: bool = False, token: str = None) -> List[dict]:
@@ -30,7 +30,7 @@ def get_practice_problems_basic(include_inactive: bool = False, token: str = Non
     if not include_inactive:
         query = query.eq("is_active", True)
         
-    response = query.order("created_at", desc=True).execute()
+    response = query.order("created_at", desc=False).execute()
     return response.data
 
 def get_practice_problem_by_id(problem_id: UUID, include_inactive: bool = False, token: str = None) -> Optional[dict]:

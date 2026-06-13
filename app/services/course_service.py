@@ -3,6 +3,8 @@ from app.schemas.course import (
     CourseCreateSchema,
     CourseUpdateSchema,
     CourseResponseSchema,
+    CourseSummaryResponseSchema,
+    CourseSection,
     InstructorSchema,
 )
 from typing import List, Dict, Any
@@ -170,8 +172,8 @@ class CourseService:
         return curriculum
 
     @staticmethod
-    def get_course_by_id(course_id_or_slug: str) -> CourseResponseSchema:
-        """Fetch a specific course by UUID or slug, dynamically hydrate co-instructors and curriculum assets"""
+    def get_course_summary_by_id(course_id_or_slug: str) -> CourseSummaryResponseSchema:
+        """Fetch a specific course summary by UUID or slug, without full curriculum hydration"""
         client = get_supabase_client()
         
         # Check if the query is a valid UUID to decide which column to query
@@ -204,13 +206,74 @@ class CourseService:
         instructor_ids = course_data.get("instructor_ids") or []
         course_data["instructors"] = CourseService._hydrate_instructors(instructor_ids, client)
 
-        # 3. Dynamically resolve curriculum items labels
-        course_data["curriculum"] = CourseService._hydrate_curriculum_assets(curriculum, client)
+        return CourseSummaryResponseSchema(**course_data)
+
+    @staticmethod
+    def get_course_by_id(course_id_or_slug: str) -> CourseResponseSchema:
+        """Fetch a specific course full object by UUID or slug (Admin use, ignores is_active)"""
+        client = get_supabase_client()
+        
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(course_id_or_slug)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+            
+        if is_uuid:
+            response = client.table(CourseService.COURSES_TABLE).select("*").eq("id", course_id_or_slug).execute()
+        else:
+            response = client.table(CourseService.COURSES_TABLE).select("*").eq("slug", course_id_or_slug).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise ValueError(f"Course with ID or slug '{course_id_or_slug}' not found")
+            
+        course_data = response.data[0]
+        curriculum = course_data.get("curriculum") or []
+
+        # Calculate dynamic statistics
+        problems, articles, videos = CourseService._calculate_dynamic_counts(curriculum)
+        course_data["total_problems"] = problems
+        course_data["total_articles"] = articles
+        course_data["total_videos"] = videos
+
+        # Hydrate instructor profiles list
+        instructor_ids = course_data.get("instructor_ids") or []
+        course_data["instructors"] = CourseService._hydrate_instructors(instructor_ids, client)
 
         return CourseResponseSchema(**course_data)
 
     @staticmethod
-    def list_courses(all_status: bool = False) -> List[CourseResponseSchema]:
+    def get_course_curriculum(course_id_or_slug: str) -> List[CourseSection]:
+        """Fetch only the curriculum tree for a specific course by UUID or slug"""
+        client = get_supabase_client()
+        
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(course_id_or_slug)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+            
+        if is_uuid:
+            response = client.table(CourseService.COURSES_TABLE).select("curriculum").eq("id", course_id_or_slug).eq("is_active", True).execute()
+        else:
+            response = client.table(CourseService.COURSES_TABLE).select("curriculum").eq("slug", course_id_or_slug).eq("is_active", True).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise ValueError(f"Course with ID or slug '{course_id_or_slug}' not found or inactive")
+            
+        curriculum = response.data[0].get("curriculum") or []
+        
+        # Hydrate assets
+        hydrated_curriculum = CourseService._hydrate_curriculum_assets(curriculum, client)
+        
+        return [CourseSection(**sec) for sec in hydrated_curriculum]
+
+    @staticmethod
+    def list_courses(all_status: bool = False) -> List[CourseSummaryResponseSchema]:
         """Fetch active courses and dynamically populate instructor lists and item counts"""
         client = get_supabase_client()
         
@@ -235,7 +298,7 @@ class CourseService:
             course_data["instructors"] = CourseService._hydrate_instructors(instructor_ids, client)
 
             # Avoid full asset hydration for general course list to optimize performance
-            results.append(CourseResponseSchema(**course_data))
+            results.append(CourseSummaryResponseSchema(**course_data))
             
         return results
 
@@ -260,7 +323,7 @@ class CourseService:
             "original_price": data.original_price,
             "curriculum": [sec.dict() for sec in data.curriculum] if data.curriculum else [],
             "status": data.status,
-            "metadata": data.metadata or {},
+            "metadata": data.metadata.model_dump() if data.metadata else {},
         }
         
         if data.id:
@@ -313,7 +376,7 @@ class CourseService:
         if data.status is not None:
             payload["status"] = data.status
         if data.metadata is not None:
-            payload["metadata"] = data.metadata
+            payload["metadata"] = data.metadata.model_dump()
             
         payload["updated_at"] = "now()"
         

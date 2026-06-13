@@ -1,12 +1,12 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from enum import Enum
 
 class CourseCategoryEnum(str, Enum):
     INTERVIEW_PREP = "interview-prep"
     CORE_DSA = "core-dsa"
     SYSTEM_DESIGN = "system-design"
-    ADVANCED = "advanced"
+    SPECIALIZED = "specialized"
 
 class CourseStatusEnum(str, Enum):
     ACTIVE = "active"
@@ -52,6 +52,45 @@ class CourseSection(BaseModel):
     class Config:
         from_attributes = True
 
+class CourseMetadataSchema(BaseModel):
+    difficulty: str = "Beginner"
+    duration_weeks: int = 4
+    total_projects: int = 0
+    marketing_syllabus: List[str] = []
+    thumbnail_url: Optional[str] = None
+    prerequisites: List[str] = []
+    learning_outcomes: List[str] = []
+    rating: float = 5.0
+    reviews: int = 0
+    number_of_students: int = 0
+    feedbacks: List[Dict[str, Any]] = []
+
+    class Config:
+        from_attributes = True
+        extra = "allow"  # Allow any other arbitrary fields
+
+class CourseSummaryResponseSchema(BaseModel):
+    id: str
+    slug: str
+    title: str
+    description: str
+    category: CourseCategoryEnum
+    instructors: List[InstructorSchema] = []
+    instructor_ids: List[str] = []
+    tags: List[str] = []
+    is_pro: bool = True
+    is_popular: bool = False
+    status: CourseStatusEnum
+    price: int
+    original_price: int
+    total_problems: int = 0
+    total_articles: int = 0
+    total_videos: int = 0
+    metadata: CourseMetadataSchema = CourseMetadataSchema()
+
+    class Config:
+        from_attributes = True
+
 class CourseResponseSchema(BaseModel):
     id: str                                             # UUID string
     slug: str                                           # SEO slug (e.g. 'dsa-bootcamp-recordings')
@@ -79,7 +118,7 @@ class CourseResponseSchema(BaseModel):
     curriculum: List[CourseSection] = []
     
     # Extensible configuration bucket
-    metadata: dict = {}
+    metadata: CourseMetadataSchema = CourseMetadataSchema()
 
     class Config:
         from_attributes = True
@@ -98,7 +137,7 @@ class CourseCreateSchema(BaseModel):
     original_price: int
     curriculum: List[CourseSection] = []
     status: CourseStatusEnum = CourseStatusEnum.DRAFT
-    metadata: Optional[dict] = None
+    metadata: Optional[CourseMetadataSchema] = None
 
 class CourseUpdateSchema(BaseModel):
     slug: Optional[str] = None
@@ -113,6 +152,6 @@ class CourseUpdateSchema(BaseModel):
     original_price: Optional[int] = None
     curriculum: Optional[List[CourseSection]] = None
     status: Optional[CourseStatusEnum] = None
-    metadata: Optional[dict] = None
+    metadata: Optional[CourseMetadataSchema] = None
 
 

@@ -60,3 +60,14 @@ async def delete_sheet_handler(sheet_id: str, token: str = None) -> dict:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+async def get_sheet_problems_handler(sheet_id: str, token: str = None) -> List[dict]:
+    """
+    Get all problems for a specific sheet.
+    """
+    try:
+        return dsa_sheet_service.get_sheet_problems(sheet_id, token=token)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

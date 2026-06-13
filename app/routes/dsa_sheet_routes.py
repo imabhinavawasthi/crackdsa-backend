@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends
 from app.schemas.dsa_sheet import DSASheet, DSASheetCreate, DSASheetUpdate
+from app.schemas.practice_problem import PracticeProblemBasic
 from app.controllers import dsa_sheet_controller
 from app.dependencies import require_role_with_token, get_token
 
@@ -25,6 +26,13 @@ async def get_sheet_public(id: str, token: Optional[str] = Depends(get_token)):
     Get a single active sheet by id.
     """
     return await dsa_sheet_controller.get_sheet_handler(id, include_inactive=False, token=token)
+
+@public_router.get("/{id}/problems", response_model=List[PracticeProblemBasic])
+async def get_sheet_problems_public(id: str, token: Optional[str] = Depends(get_token)):
+    """
+    Get all problems detailed info for a single active sheet.
+    """
+    return await dsa_sheet_controller.get_sheet_problems_handler(id, token=token)
 
 
 # --- Admin Router ---
