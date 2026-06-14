@@ -8,3 +8,4 @@ pydantic-settings
 google-generativeai
 supabase
 httpx
+razorpay
