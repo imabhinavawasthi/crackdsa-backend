@@ -14,10 +14,13 @@ class CourseStatusEnum(str, Enum):
     DRAFT = "draft"
 
 class InstructorSchema(BaseModel):
+    id: str
     name: str
     role: str
     company: str
     color: str
+    profile_image_url: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -55,6 +58,7 @@ class CourseSection(BaseModel):
 class CourseMetadataSchema(BaseModel):
     difficulty: str = "Beginner"
     duration_weeks: int = 4
+    duration_hours: int = 0
     total_projects: int = 0
     marketing_syllabus: List[str] = []
     thumbnail_url: Optional[str] = None
@@ -75,7 +79,6 @@ class CourseSummaryResponseSchema(BaseModel):
     title: str
     description: str
     category: CourseCategoryEnum
-    instructors: List[InstructorSchema] = []
     instructor_ids: List[str] = []
     tags: List[str] = []
     is_pro: bool = True
@@ -98,8 +101,6 @@ class CourseResponseSchema(BaseModel):
     description: str
     category: CourseCategoryEnum
     
-    # Support list of co-instructors
-    instructors: List[InstructorSchema] = []
     instructor_ids: List[str] = []
     
     tags: List[str] = []

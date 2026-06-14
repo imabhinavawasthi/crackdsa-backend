@@ -80,8 +80,8 @@ admin_router = APIRouter(
     tags=["Courses (Admin)"]
 )
 
-@admin_router.get("", response_model=List[CourseResponseSchema])
-@admin_router.get("/", response_model=List[CourseResponseSchema], include_in_schema=False)
+@admin_router.get("", response_model=List[CourseSummaryResponseSchema])
+@admin_router.get("/", response_model=List[CourseSummaryResponseSchema], include_in_schema=False)
 def list_courses_admin(admin_user = Depends(verify_admin_token)):
     """
     List all active + draft + upcoming courses for administrative audit.

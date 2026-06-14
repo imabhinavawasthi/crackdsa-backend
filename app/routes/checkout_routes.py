@@ -29,13 +29,13 @@ rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 def get_plan_price(purchase_type: str, target_id: Optional[str]) -> float:
     # Hardcoded prices for now; normally fetched from DB
     if purchase_type == "pro_subscription":
-        if target_id == "3_months": return 2999.0
-        if target_id == "6_months": return 4999.0
-        if target_id == "12_months": return 7999.0
-        return 2999.0
+        if target_id == "3_months": return 1.0
+        if target_id == "6_months": return 1.0
+        if target_id == "12_months": return 1.0
+        return 1.0
     elif purchase_type == "course":
         # Assume standard course price
-        return 3999.0
+        return 1
     return 0.0
 
 @router.post("/apply-coupon", response_model=CouponValidateResponse)
@@ -291,3 +291,4 @@ async def razorpay_webhook(request: Request):
                 client.table("users").update({"purchased_courses": purchased_courses}).eq("id", user_id).execute()
                 
     return {"status": "ok"}
+
