@@ -16,10 +16,10 @@ class UserAssetStateService:
     TABLE_NAME = "user_asset_states"
 
     @staticmethod
-    def get_user_asset_states(user_id: UUID) -> list[UserAssetStateResponseSchema]:
+    def get_user_asset_states(user_id: UUID, token: str) -> list[UserAssetStateResponseSchema]:
         """Fetch all learning interactions, bookmarks, and notepad entries for a user in a single bulk query"""
         try:
-            client = get_supabase_client()
+            client = get_supabase_client(token)
             
             response = client.table(UserAssetStateService.TABLE_NAME).select(
                 "*"
@@ -42,14 +42,15 @@ class UserAssetStateService:
         user_id: UUID, 
         asset_id: str, 
         asset_type: str, 
-        data: UserAssetStateUpdateSchema
+        data: UserAssetStateUpdateSchema,
+        token: str
     ) -> UserAssetStateResponseSchema:
         """
         Upsert (insert or merge-update) the state, notes, or bookmark of an individual asset for a user.
         Merges with existing states in the database to prevent accidental data loss!
         """
         try:
-            client = get_supabase_client()
+            client = get_supabase_client(token)
             user_uuid_str = str(user_id)
 
             # 1. Fetch existing state to perform a safe merge
