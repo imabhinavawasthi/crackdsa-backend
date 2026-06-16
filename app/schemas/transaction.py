@@ -34,6 +34,7 @@ class TransactionResponse(TransactionBase):
 class OrderCreateRequest(BaseModel):
     purchase_type: Literal["pro_subscription", "course"]
     target_id: Optional[str] = None
+    target_name: Optional[str] = None
     coupon_code: Optional[str] = None
 
 class OrderCreateResponse(BaseModel):

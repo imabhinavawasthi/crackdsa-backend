@@ -188,7 +188,8 @@ async def create_order(
         "razorpay_order_id": rzp_order["id"],
         "coupon_id": coupon_id,
         "purchase_type": req.purchase_type,
-        "target_id": req.target_id
+        "target_id": req.target_id,
+        "metadata": {"target_name": req.target_name} if req.target_name else {}
     }
     
     db_res = client.table("transactions").insert(tx_data).execute()
@@ -253,42 +254,95 @@ async def razorpay_webhook(request: Request):
         user_res = client.table("users").select("*").eq("id", user_id).execute()
         if user_res.data:
             user_row = user_res.data[0]
+            now = datetime.now(timezone.utc)
+            now_iso = now.isoformat()
             
             if tx["purchase_type"] == "pro_subscription":
-                months = 3
-                if tx["target_id"] == "6_months": months = 6
-                if tx["target_id"] == "12_months": months = 12
+                plan_id = tx["target_id"]
+                days = -1
+                if plan_id == "monthly": days = 30
+                elif plan_id == "six-months": days = 180
                 
-                # Calculate expiration
-                now = datetime.now(timezone.utc)
                 pro_sub = user_row.get("pro_subscription") or {}
                 
-                current_expiry = pro_sub.get("expires_at")
-                if current_expiry:
-                    current_dt = datetime.fromisoformat(current_expiry.replace("Z", "+00:00"))
-                    if current_dt > now:
-                        new_expiry = current_dt + relativedelta(months=months)
-                    else:
-                        new_expiry = now + relativedelta(months=months)
+                all_purchases = pro_sub.get("all_purchases", [])
+                
+                purchase_entry = {
+                    "duration_in_days": str(days),
+                    "purchase_date_epoch": int(now.timestamp()),
+                    "transaction_id": str(tx["id"])
+                }
+                all_purchases.append(purchase_entry)
+                
+                current_expiry_epoch = pro_sub.get("subscription_active_till_epoch", 0)
+                
+                if current_expiry_epoch == -1 or days == -1:
+                    new_expiry_epoch = -1
                 else:
-                    new_expiry = now + relativedelta(months=months)
-                    
-                pro_sub["is_active"] = True
-                pro_sub["expires_at"] = new_expiry.isoformat()
-                pro_sub["plan"] = tx["target_id"]
+                    if current_expiry_epoch > int(now.timestamp()):
+                        new_expiry_epoch = current_expiry_epoch + (days * 86400)
+                    else:
+                        new_expiry_epoch = int(now.timestamp()) + (days * 86400)
+                        
+                pro_sub["all_purchases"] = all_purchases
+                pro_sub["subscription_active_till_epoch"] = new_expiry_epoch
                 
                 client.table("users").update({"pro_subscription": pro_sub}).eq("id", user_id).execute()
                 
             elif tx["purchase_type"] == "course":
-                purchased_courses = user_row.get("purchased_courses") or []
+                purchased_courses = user_row.get("purchased_courses") or {}
+                courses_arr = purchased_courses.get("courses", [])
+                
                 course_id = tx["target_id"]
-                if course_id not in purchased_courses:
-                    if isinstance(purchased_courses, list):
-                        purchased_courses.append(course_id)
-                    else:
-                        purchased_courses = [course_id]
-                        
-                client.table("users").update({"purchased_courses": purchased_courses}).eq("id", user_id).execute()
+                metadata = tx.get("metadata") or {}
+                course_name = metadata.get("target_name", course_id)
+                
+                # Check if already purchased
+                already_purchased = any(c.get("course_id") == course_id for c in courses_arr)
+                
+                if not already_purchased:
+                    courses_arr.append({
+                        "course_id": course_id,
+                        "purchase_date_epoch": int(now.timestamp()),
+                        "valid_till_epoch": -1,
+                        "course_name": course_name,
+                        "transaction_id": str(tx["id"])
+                    })
+                    
+                    purchased_courses["courses"] = courses_arr
+                    client.table("users").update({"purchased_courses": purchased_courses}).eq("id", user_id).execute()
                 
     return {"status": "ok"}
+
+@router.get("/transactions")
+async def get_my_transactions(user: Dict[str, Any] = Depends(get_current_user)):
+    """Fetch the authenticated user's transactions."""
+    client = get_supabase_client()
+    res = client.table("transactions").select("*").eq("user_id", user["id"]).order("created_at", desc=True).execute()
+    
+    transactions = res.data or []
+    now = datetime.now(timezone.utc)
+    
+    for tx in transactions:
+        if tx["status"] == "pending":
+            try:
+                tx_created = datetime.fromisoformat(tx["created_at"].replace("Z", "+00:00"))
+                if (now - tx_created).total_seconds() > 86400: # 1 day
+                    tx["status"] = "failed"
+                    try:
+                        client.table("transactions").update({
+                            "status": "failed",
+                            "failure_reason": "timeout"
+                        }).eq("id", tx["id"]).execute()
+                        tx["failure_reason"] = "timeout"
+                    except Exception:
+                        # Fallback if failure_reason column doesn't exist
+                        client.table("transactions").update({
+                            "status": "failed"
+                        }).eq("id", tx["id"]).execute()
+            except Exception as e:
+                logger.error(f"Failed to check timeout for tx {tx['id']}: {e}")
+                
+    return {"items": transactions}
+
 

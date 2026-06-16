@@ -13,6 +13,7 @@ from app.database import get_supabase_client
 from app.config import settings
 import logging
 import httpx
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,26 @@ async def me(user: Dict[str, Any] = Depends(get_current_user)):
                 # Align the ID in the database to match Supabase Auth UUID
                 client.table("users").update({"id": user_id}).eq("id", existing_id).execute()
         
+        now_epoch = int(time.time())
+        
+        pro_sub = db_user.get("pro_subscription") or {}
+        # Support both legacy schema (is_active) and new schema (subscription_active_till_epoch)
+        if "subscription_active_till_epoch" in pro_sub:
+            expiry = pro_sub.get("subscription_active_till_epoch", 0)
+            is_pro_active = (expiry == -1) or (expiry > now_epoch)
+        else:
+            is_pro_active = pro_sub.get("is_active", False)
+            
+        pc = db_user.get("purchased_courses") or {}
+        enrolled_courses = []
+        if "courses" in pc:
+            courses = pc.get("courses", [])
+            enrolled_courses = [{"course_id": c.get("course_id"), "course_name": c.get("course_name")} for c in courses]
+        else:
+            # Legacy mapping
+            for c_id, _ in pc.items():
+                enrolled_courses.append({"course_id": c_id, "course_name": c_id})
+        
         # Merge profile fields into user dict
         response_data = {
             **user,
@@ -69,8 +90,8 @@ async def me(user: Dict[str, Any] = Depends(get_current_user)):
             "codeforces_handle": db_user.get("codeforces_id") or "",
             "social_links": db_user.get("social_links") or {},
             "metadata": db_user.get("metadata") or {},
-            "pro_subscription": db_user.get("pro_subscription") or {},
-            "purchased_courses": db_user.get("purchased_courses") or {},
+            "is_pro_active": is_pro_active,
+            "enrolled_courses": enrolled_courses,
         }
         
         # Override full_name if it is stored in database metadata
@@ -90,9 +111,34 @@ async def me(user: Dict[str, Any] = Depends(get_current_user)):
             "codeforces_handle": "",
             "social_links": {},
             "metadata": {},
-            "pro_subscription": {},
-            "purchased_courses": {},
+            "is_pro_active": False,
+            "enrolled_courses": [],
         }
+
+
+@router.get("/subscription-details")
+async def get_subscription_details(user: Dict[str, Any] = Depends(get_current_user)):
+    """Get complete subscription and course purchase details for the authenticated user."""
+    try:
+        client = get_supabase_client()
+        user_id = user["id"]
+        
+        res = client.table("users").select(
+            "pro_subscription, purchased_courses"
+        ).eq("id", user_id).execute()
+        
+        if not res.data:
+            return {"pro_subscription": {}, "purchased_courses": {"courses": []}}
+            
+        db_user = res.data[0]
+        
+        return {
+            "pro_subscription": db_user.get("pro_subscription") or {},
+            "purchased_courses": db_user.get("purchased_courses") or {"courses": []}
+        }
+    except Exception as e:
+        logger.error(f"Error fetching subscription details for user {user['id']}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch subscription details")
 
 
 @router.put("/profile")
