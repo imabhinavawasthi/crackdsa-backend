@@ -13,11 +13,20 @@ public_router = APIRouter(
 )
 
 @public_router.get("", response_model=List[PracticeProblemBasic])
-async def list_problems_public(token: Optional[str] = Depends(get_token)):
+async def list_problems_public(
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    token: Optional[str] = Depends(get_token)
+):
     """
-    List all active practice problems for student discovery.
+    List all active practice problems for student discovery. Supports limit and offset pagination.
     """
-    return await practice_problem_controller.list_problems_basic_handler(include_inactive=False, token=token)
+    return await practice_problem_controller.list_problems_basic_handler(
+        include_inactive=False, 
+        token=token,
+        limit=limit,
+        offset=offset
+    )
 
 @public_router.get("/topics-summary")
 async def get_topics_summary_route(token: Optional[str] = Depends(get_token)):

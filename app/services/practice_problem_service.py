@@ -19,9 +19,15 @@ def get_practice_problems(include_inactive: bool = False, token: str = None) -> 
     response = query.order("created_at", desc=False).execute()
     return response.data
 
-def get_practice_problems_basic(include_inactive: bool = False, token: str = None) -> List[dict]:
+def get_practice_problems_basic(
+    include_inactive: bool = False, 
+    token: str = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None
+) -> List[dict]:
     """
     Fetch only basic details (excluding description, solutions, resources) for practice problems.
+    Supports optional limit and offset pagination.
     """
     client = get_supabase_client(jwt_token=token)
     cols = "id,slug,title,difficulty,platform,problem_url,attributes,is_active,created_at,updated_at"
@@ -30,7 +36,14 @@ def get_practice_problems_basic(include_inactive: bool = False, token: str = Non
     if not include_inactive:
         query = query.eq("is_active", True)
         
-    response = query.order("created_at", desc=False).execute()
+    query = query.order("created_at", desc=False)
+    
+    if limit is not None:
+        start = offset or 0
+        end = start + limit - 1
+        query = query.range(start, end)
+        
+    response = query.execute()
     return response.data
 
 def get_practice_problem_by_id(problem_id: UUID, include_inactive: bool = False, token: str = None) -> Optional[dict]:

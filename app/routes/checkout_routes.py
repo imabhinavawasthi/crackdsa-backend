@@ -268,7 +268,7 @@ async def razorpay_webhook(request: Request):
                 all_purchases = pro_sub.get("all_purchases", [])
                 
                 purchase_entry = {
-                    "duration_in_days": str(days),
+                    "duration_in_days": days,
                     "purchase_date_epoch": int(now.timestamp()),
                     "transaction_id": str(tx["id"])
                 }

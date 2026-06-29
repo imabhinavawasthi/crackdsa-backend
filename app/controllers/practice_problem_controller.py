@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import HTTPException
 from app.schemas.practice_problem import PracticeProblemCreate, PracticeProblemUpdate
 from app.services import practice_problem_service
@@ -13,12 +13,22 @@ async def list_problems_handler(include_inactive: bool = False, token: str = Non
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch practice problems: {str(e)}")
 
-async def list_problems_basic_handler(include_inactive: bool = False, token: str = None) -> List[dict]:
+async def list_problems_basic_handler(
+    include_inactive: bool = False, 
+    token: str = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None
+) -> List[dict]:
     """
     Controller handler to list only basic details of practice problems.
     """
     try:
-        return practice_problem_service.get_practice_problems_basic(include_inactive=include_inactive, token=token)
+        return practice_problem_service.get_practice_problems_basic(
+            include_inactive=include_inactive, 
+            token=token,
+            limit=limit,
+            offset=offset
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch basic practice problems: {str(e)}")
 
