@@ -16,7 +16,23 @@ def get_sheets(include_inactive: bool = False, token: str = None) -> List[dict]:
         query = query.eq("is_active", True)
         
     response = query.order("created_at", desc=True).execute()
-    return response.data
+    
+    sheets = response.data or []
+    for sheet in sheets:
+        sheet_json = sheet.get("sheet_json") or {}
+        topics = sheet_json.get("topics", [])
+        total_topics = len(topics)
+        total_problems = 0
+        for topic in topics:
+            for step in topic.get("steps", []):
+                total_problems += len(step.get("problems", []))
+        
+        sheet["total_topics"] = total_topics
+        sheet["total_problems"] = total_problems
+        # Purge sheet_json to make the response extremely lightweight
+        sheet.pop("sheet_json", None)
+        
+    return sheets
 
 def get_sheet_by_id(sheet_id: str, include_inactive: bool = False, token: str = None) -> Optional[dict]:
     """

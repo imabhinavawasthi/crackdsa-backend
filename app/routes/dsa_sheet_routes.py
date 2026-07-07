@@ -1,6 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends
-from app.schemas.dsa_sheet import DSASheet, DSASheetCreate, DSASheetUpdate
+from app.schemas.dsa_sheet import DSASheet, DSASheetCreate, DSASheetUpdate, DSASheetSummary
 from app.schemas.practice_problem import PracticeProblemBasic
 from app.controllers import dsa_sheet_controller
 from app.dependencies import require_role_with_token, get_token
@@ -12,7 +12,7 @@ public_router = APIRouter(
     tags=["DSA Sheets (Public)"]
 )
 
-@public_router.get("", response_model=List[DSASheet])
+@public_router.get("", response_model=List[DSASheetSummary])
 async def list_sheets_public(token: Optional[str] = Depends(get_token)):
     """
     List all active sheets for public users.
@@ -43,7 +43,7 @@ admin_router = APIRouter(
     # We apply the dependency at each route to extract the token easily
 )
 
-@admin_router.get("", response_model=List[DSASheet])
+@admin_router.get("", response_model=List[DSASheetSummary])
 async def list_sheets_admin(auth_data: dict = Depends(require_role_with_token("admin"))):
     """
     List all sheets (active + inactive) for administrative use.

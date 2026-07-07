@@ -8,7 +8,7 @@ Backend provides utility endpoints.
 from fastapi import APIRouter, HTTPException, Response, Depends
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
-from app.dependencies import get_current_user, get_current_user_optional, get_current_user_with_token, build_user_response
+from app.dependencies import get_current_user, get_current_user_optional, get_current_user_with_token, build_user_response, get_token
 from app.database import get_supabase_client
 from app.config import settings
 import logging
@@ -98,10 +98,13 @@ def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any]
 
 
 @router.get("/me")
-async def me(user: Dict[str, Any] = Depends(get_current_user)):
+async def me(
+    user: Dict[str, Any] = Depends(get_current_user),
+    token: str = Depends(get_token)
+):
     """Get current authenticated user data including profile fields from public.users."""
     try:
-        client = get_supabase_client()  # Admin client (RLS-bypass)
+        client = get_supabase_client(jwt_token=token)  # Scoped user client (RLS-enabled)
         user_id = user["id"]
         
         # Query public.users table for profile fields by ID
@@ -111,16 +114,23 @@ async def me(user: Dict[str, Any] = Depends(get_current_user)):
         
         db_user = res.data[0] if res.data and len(res.data) > 0 else {}
         
-        # Self-healing: if not found by ID, search by user_email
+        # Self-healing: if not found by ID, search by user_email (may require admin client to align IDs if RLS blocks it)
         if not db_user:
-            email_res = client.table("users").select(
+            admin_client = get_supabase_client()  # Fallback to Admin client to align IDs
+            email_res = admin_client.table("users").select(
                 "id, college, graduation_year, branch, codeforces_id, social_links, metadata, pro_subscription, purchased_courses"
             ).eq("user_email", user["email"]).execute()
             if email_res.data:
                 db_user = email_res.data[0]
                 existing_id = db_user["id"]
                 # Align the ID in the database to match Supabase Auth UUID
-                client.table("users").update({"id": user_id}).eq("id", existing_id).execute()
+                admin_client.table("users").update({"id": user_id}).eq("id", existing_id).execute()
+                
+                # Re-query using the user's token client after alignment
+                res = client.table("users").select(
+                    "id, college, graduation_year, branch, codeforces_id, social_links, metadata, pro_subscription, purchased_courses"
+                ).eq("id", user_id).execute()
+                db_user = res.data[0] if res.data and len(res.data) > 0 else {}
         
         return _hydrate_user_profile_response(user, db_user, client)
     except Exception as e:

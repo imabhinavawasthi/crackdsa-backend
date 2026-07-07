@@ -57,3 +57,20 @@ class DSASheet(DSASheetBase):
 
     class Config:
         from_attributes = True
+
+class DSASheetSummary(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    tags: List[str] = []
+    level: Literal['beginner', 'intermediate', 'advanced']
+    estimated_hours: Optional[int] = None
+    is_public: bool = True
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    total_topics: int = 0
+    total_problems: int = 0
+
+    class Config:
+        from_attributes = True
