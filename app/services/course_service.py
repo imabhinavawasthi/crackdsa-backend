@@ -279,7 +279,7 @@ class CourseService:
         
         query = client.table(CourseService.COURSES_TABLE).select("*").eq("is_active", True)
         if not all_status:
-            query = query.eq("status", "active")
+            query = query.in_("status", ["active", "upcoming"])
             
         response = query.execute()
         
