@@ -407,3 +407,111 @@ class CourseService:
             
         logger.info(f"Deleted course: {course_id} (hard={hard_delete})")
         return True
+
+    @staticmethod
+    def get_batch_topic_details(course_id_or_slug: str, topics: List[str]) -> Dict[str, Any]:
+        """
+        Fetch details for multiple topics in a single call by matching section titles case-insensitively and trimmed.
+        """
+        client = get_supabase_client()
+        
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(course_id_or_slug)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+            
+        if is_uuid:
+            response = client.table(CourseService.COURSES_TABLE).select("*").eq("id", course_id_or_slug).eq("is_active", True).execute()
+        else:
+            response = client.table(CourseService.COURSES_TABLE).select("*").eq("slug", course_id_or_slug).eq("is_active", True).execute()
+        
+        curriculum = []
+        course_slug = course_id_or_slug
+        if response.data and len(response.data) > 0:
+            course_data = response.data[0]
+            curriculum = course_data.get("curriculum") or []
+            course_slug = course_data.get("slug") or course_id_or_slug
+
+        import re
+
+        def normalize_text(text: str) -> str:
+            if not text:
+                return ""
+            text_no_dash = text.replace("-", " ")
+            return re.sub(r"[^a-zA-Z0-9\s]", "", text_no_dash).lower().strip()
+
+        matched_topics = {}
+
+        for topic in topics:
+            clean_topic = normalize_text(topic)
+            matched_sec = None
+
+            for sec in curriculum:
+                clean_sec_title = normalize_text(sec.get("title") or "")
+                clean_sec_id = normalize_text(sec.get("id") or "")
+
+                if (
+                    clean_topic == clean_sec_id
+                    or clean_topic == clean_sec_title
+                    or clean_topic in clean_sec_title
+                    or clean_sec_title in clean_topic
+                ):
+                    matched_sec = sec
+                    break
+
+            if matched_sec:
+                videos_count = 0
+                problems_count = 0
+                articles_count = 0
+                subsections = matched_sec.get("subsections") or []
+                chapters_count = len(subsections) if len(subsections) > 0 else 1
+
+                def count_items(items):
+                    nonlocal videos_count, problems_count, articles_count
+                    for item in items or []:
+                        t = item.get("type")
+                        if t == "video":
+                            videos_count += 1
+                        elif t == "problem":
+                            problems_count += 1
+                        elif t == "article":
+                            articles_count += 1
+
+                count_items(matched_sec.get("items"))
+                for sub in subsections:
+                    count_items(sub.get("items"))
+
+                items_count = videos_count + problems_count + articles_count
+
+                matched_topics[topic] = {
+                    "title": topic,
+                    "found": True,
+                    "section_id": matched_sec.get("id"),
+                    "chapters_count": chapters_count,
+                    "items_count": items_count,
+                    "videos_count": videos_count,
+                    "problems_count": problems_count,
+                    "articles_count": articles_count,
+                    "is_upcoming": items_count == 0,
+                }
+            else:
+                matched_topics[topic] = {
+                    "title": topic,
+                    "found": False,
+                    "section_id": None,
+                    "chapters_count": 0,
+                    "items_count": 0,
+                    "videos_count": 0,
+                    "problems_count": 0,
+                    "articles_count": 0,
+                    "is_upcoming": True,
+                }
+
+        return {
+            "course_slug": course_slug,
+            "matched_topics": matched_topics,
+        }
+

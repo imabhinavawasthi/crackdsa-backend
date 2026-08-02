@@ -6,6 +6,8 @@ from app.schemas.course import (
     CourseSection,
     CourseCreateSchema,
     CourseUpdateSchema,
+    BatchTopicRequestSchema,
+    BatchTopicResponseSchema,
 )
 from app.services.course_service import CourseService
 from app.dependencies import verify_admin_token
@@ -72,6 +74,22 @@ def get_course_curriculum_public(course_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch course curriculum"
+        )
+
+@public_router.post("/{course_id}/batch-topic-details", response_model=BatchTopicResponseSchema)
+@public_router.post("/{course_id}/batch-topic-details/", response_model=BatchTopicResponseSchema, include_in_schema=False)
+def get_batch_topic_details_public(course_id: str, body: BatchTopicRequestSchema):
+    """
+    Fetch dynamic topic details (chapters, items, videos, problems, upcoming status)
+    for multiple requested topic titles in a single batch call.
+    """
+    try:
+        return CourseService.get_batch_topic_details(course_id, body.topics)
+    except Exception as e:
+        logger.error(f"Error fetching batch topic details for '{course_id}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch batch topic details"
         )
 # --- Admin Router ---
 # Full CRUD control: reserved for SDE admins, includes draft/upcoming listings

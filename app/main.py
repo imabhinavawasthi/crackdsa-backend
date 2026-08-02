@@ -55,6 +55,7 @@ from app.routes.article_routes import public_router as article_public_router, ad
 from app.routes.user_asset_state_routes import router as user_asset_state_router
 from app.routes.checkout_routes import router as checkout_router
 from app.routes.admin_payments_routes import router as admin_payments_router
+from app.routes.potd_routes import router as potd_router
 from app.routes.test_routes.auth import router as test_auth_router
 from app.routes.test_routes.rbac import router as test_rbac_router
 app.include_router(roadmap_router, prefix="/api/v1")
@@ -75,6 +76,7 @@ app.include_router(article_admin_router, prefix="/api/v1")
 app.include_router(user_asset_state_router, prefix="/api/v1")
 app.include_router(checkout_router, prefix="/api/v1")
 app.include_router(admin_payments_router, prefix="/api/v1")
+app.include_router(potd_router, prefix="/api/v1")
 app.include_router(test_auth_router)
 app.include_router(test_rbac_router)
 

@@ -155,4 +155,23 @@ class CourseUpdateSchema(BaseModel):
     status: Optional[CourseStatusEnum] = None
     metadata: Optional[CourseMetadataSchema] = None
 
+class BatchTopicRequestSchema(BaseModel):
+    topics: List[str]
+
+class TopicDetailSchema(BaseModel):
+    title: str
+    found: bool
+    section_id: Optional[str] = None
+    chapters_count: int = 0
+    items_count: int = 0
+    videos_count: int = 0
+    problems_count: int = 0
+    articles_count: int = 0
+    is_upcoming: bool = True
+
+class BatchTopicResponseSchema(BaseModel):
+    course_slug: str
+    matched_topics: Dict[str, TopicDetailSchema]
+
+
 
