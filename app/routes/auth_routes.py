@@ -5,12 +5,20 @@ Frontend handles complete Supabase OAuth flow.
 Backend provides utility endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Response, Depends
+from fastapi import APIRouter, HTTPException, Response, Depends, status
 from typing import Dict, Any, Optional
-from pydantic import BaseModel
 from app.dependencies import get_current_user, get_current_user_optional, get_current_user_with_token, build_user_response, get_token
 from app.database import get_supabase_client
 from app.config import settings
+from app.schemas.user_profile import (
+    UserProfileResponse,
+    ProfileUpdateSchema,
+    SubscriptionDetailsResponse,
+    RefreshTokenSchema,
+    RefreshTokenResponse,
+    TokenStatusResponse,
+    LogoutResponse,
+)
 import logging
 import httpx
 import time
@@ -22,19 +30,10 @@ router = APIRouter(
     tags=["Authentication"]
 )
 
-
-class ProfileUpdateSchema(BaseModel):
-    full_name: Optional[str] = None
-    college: Optional[str] = None
-    graduation_year: Optional[str] = None
-    branch: Optional[str] = None
-    codeforces_handle: Optional[str] = None
-    social_links: Optional[Dict[str, str]] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class RefreshTokenSchema(BaseModel):
-    refresh_token: str
+oauth_router = APIRouter(
+    prefix="/oauth",
+    tags=["Authentication (OAuth Alias)"]
+)
 
 def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any], client: Any) -> Dict[str, Any]:
     now_epoch = int(time.time())
@@ -87,6 +86,7 @@ def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any]
         "pro_courses": pro_courses,
         "purchased_courses": purchased_courses,
         "enrolled_courses": enrolled_courses,
+        "pro_subscription": pro_sub,
     }
     
     # Override full_name if it is stored in database metadata
@@ -97,7 +97,7 @@ def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any]
     return response_data
 
 
-@router.get("/me")
+@router.get("/me", response_model=UserProfileResponse)
 async def me(
     user: Dict[str, Any] = Depends(get_current_user),
     token: str = Depends(get_token)
@@ -148,10 +148,11 @@ async def me(
             "pro_courses": [],
             "purchased_courses": [],
             "enrolled_courses": [],
+            "pro_subscription": {},
         }
 
 
-@router.get("/subscription-details")
+@router.get("/subscription-details", response_model=SubscriptionDetailsResponse)
 async def get_subscription_details(user: Dict[str, Any] = Depends(get_current_user)):
     """Get complete subscription and course purchase details for the authenticated user."""
     try:
@@ -176,7 +177,7 @@ async def get_subscription_details(user: Dict[str, Any] = Depends(get_current_us
         raise HTTPException(status_code=500, detail="Failed to fetch subscription details")
 
 
-@router.put("/profile")
+@router.put("/profile", response_model=UserProfileResponse)
 async def update_profile(
     profile_data: ProfileUpdateSchema,
     auth_data: Dict[str, Any] = Depends(get_current_user_with_token)
@@ -261,7 +262,7 @@ async def update_profile(
         )
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse)
 async def logout(response: Response):
     """Logout user by clearing Supabase token cookies."""
     try:
@@ -283,13 +284,19 @@ async def logout(response: Response):
         )
 
 
-@router.get("/token-status")
+@oauth_router.post("/logout", response_model=LogoutResponse, include_in_schema=False)
+async def oauth_logout(response: Response):
+    """Alias for /api/v1/auth/logout to ensure backwards compatibility with OAuth client calls."""
+    return await logout(response)
+
+
+@router.get("/token-status", response_model=TokenStatusResponse)
 async def token_status(user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)):
     """Check if user has a valid token."""
     return {"authenticated": user is not None}
 
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=RefreshTokenResponse)
 async def refresh_token(data: RefreshTokenSchema):
     """Silently refresh a user's session using their refresh token."""
     try:

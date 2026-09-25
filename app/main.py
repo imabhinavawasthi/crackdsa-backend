@@ -45,7 +45,7 @@ app.add_middleware(
 )
 
 from app.routes.roadmap_routes import router as roadmap_router, admin_router as roadmap_admin_router
-from app.routes.auth_routes import router as auth_router
+from app.routes.auth_routes import router as auth_router, oauth_router
 from app.routes.dsa_sheet_routes import public_router, admin_router
 from app.routes.course_routes import public_router as course_public_router, admin_router as course_admin_router
 from app.routes.instructor_routes import public_router as instructor_public_router, admin_router as instructor_admin_router
@@ -61,6 +61,7 @@ from app.routes.test_routes.rbac import router as test_rbac_router
 app.include_router(roadmap_router, prefix="/api/v1")
 app.include_router(roadmap_admin_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(oauth_router, prefix="/api/v1")
 app.include_router(public_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(course_public_router, prefix="/api/v1")
