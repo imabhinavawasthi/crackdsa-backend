@@ -14,7 +14,7 @@ class CourseStatusEnum(str, Enum):
     DRAFT = "draft"
 
 class InstructorSchema(BaseModel):
-    id: str
+    id: Optional[str] = None
     name: str
     role: str
     company: str
@@ -72,6 +72,60 @@ class CourseMetadataSchema(BaseModel):
     class Config:
         from_attributes = True
         extra = "allow"  # Allow any other arbitrary fields
+
+class CourseBasicResponseSchema(BaseModel):
+    title: str
+    description: str
+    id: str
+    category: str
+    tags: List[str] = []
+    is_pro: bool = True
+    is_popular: bool = False
+    price: int
+    original_price: int
+    status: str
+    slug: str
+
+    class Config:
+        from_attributes = True
+
+class CourseDetailResponseSchema(BaseModel):
+    id: str
+    slug: str
+    title: str
+    description: str
+    category: str
+    instructor_ids: List[str] = []
+    instructors: List[InstructorSchema] = []
+    tags: List[str] = []
+    is_pro: bool = True
+    is_popular: bool = False
+    price: int
+    original_price: int
+    status: str
+    total_problems: int = 0
+    total_articles: int = 0
+    total_videos: int = 0
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        extra = "allow"
+
+class CourseVideoAccessResponse(BaseModel):
+    item_id: str
+    section_id: str
+    title: str
+    asset_id: str
+    video_url: str
+    duration_seconds: int = 0
+    thumbnail_url: Optional[str] = None
+    resources: Optional[Dict[str, Any]] = None
+    attributes: Optional[Dict[str, Any]] = None
+    is_free: bool = False
+    has_access: bool = True
 
 class CourseSummaryResponseSchema(BaseModel):
     id: str
@@ -172,6 +226,3 @@ class TopicDetailSchema(BaseModel):
 class BatchTopicResponseSchema(BaseModel):
     course_slug: str
     matched_topics: Dict[str, TopicDetailSchema]
-
-
-

@@ -4,10 +4,14 @@ from app.schemas.course import (
     CourseUpdateSchema,
     CourseResponseSchema,
     CourseSummaryResponseSchema,
+    CourseBasicResponseSchema,
+    CourseDetailResponseSchema,
+    CourseVideoAccessResponse,
     CourseSection,
     InstructorSchema,
 )
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -301,6 +305,340 @@ class CourseService:
             results.append(CourseSummaryResponseSchema(**course_data))
             
         return results
+
+    @staticmethod
+    def list_basic_courses(status: Optional[str] = "active", include_upcoming: bool = False) -> List[CourseBasicResponseSchema]:
+        """
+        Fetch courses with basic metadata only:
+        title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug
+        """
+        client = get_supabase_client()
+        query = client.table(CourseService.COURSES_TABLE).select(
+            "id, slug, title, description, category, tags, is_pro, is_popular, price, original_price, status"
+        )
+        if status:
+            if status == "active" and include_upcoming:
+                query = query.in_("status", ["active", "upcoming"])
+            else:
+                query = query.eq("status", status)
+
+        response = query.order("created_at", desc=False).execute()
+        results = []
+        for c in (response.data or []):
+            results.append(CourseBasicResponseSchema(
+                title=c["title"],
+                description=c["description"],
+                id=str(c["id"]),
+                category=c["category"],
+                tags=c.get("tags") or [],
+                is_pro=c.get("is_pro", True),
+                is_popular=c.get("is_popular", False),
+                price=c.get("price", 0),
+                original_price=c.get("original_price", 0),
+                status=c.get("status", "draft"),
+                slug=c["slug"]
+            ))
+        return results
+
+    @staticmethod
+    def _check_user_entitlement(user: Dict[str, Any], course: Dict[str, Any], client: Any) -> bool:
+        """Check if user has permission to access paid course content"""
+        roles = user.get("roles") or []
+        if "admin" in roles:
+            return True
+
+        user_id = user.get("id")
+        if not user_id:
+            return False
+
+        u_res = client.table("users").select("pro_subscription, purchased_courses").eq("id", user_id).execute()
+        if not u_res.data:
+            return False
+
+        db_user = u_res.data[0]
+        now_epoch = int(time.time())
+
+        # 1. Pro Subscription check
+        pro_sub = db_user.get("pro_subscription") or {}
+        if "subscription_active_till_epoch" in pro_sub:
+            expiry = pro_sub.get("subscription_active_till_epoch", 0)
+            is_pro_active = (expiry == -1) or (expiry > now_epoch)
+        else:
+            is_pro_active = pro_sub.get("is_active", False)
+
+        if course.get("is_pro", True) and is_pro_active:
+            return True
+
+        # 2. Individual purchase check
+        pc = db_user.get("purchased_courses") or {}
+        courses_arr = pc.get("courses", []) if isinstance(pc, dict) else []
+        cid = str(course.get("id"))
+        cslug = str(course.get("slug"))
+
+        for c in courses_arr:
+            purchased_cid = str(c.get("course_id") or "")
+            if purchased_cid in (cid, cslug):
+                valid_till = c.get("valid_till_epoch", -1)
+                if valid_till == -1 or valid_till > now_epoch:
+                    return True
+
+        return False
+
+    @staticmethod
+    def get_purchased_courses(user: Dict[str, Any]) -> List[CourseBasicResponseSchema]:
+        """Get all courses accessible to the authenticated user via active Pro subscription or individual purchase"""
+        client = get_supabase_client()
+        user_id = user.get("id")
+        if not user_id:
+            return []
+
+        res = client.table("users").select("pro_subscription, purchased_courses").eq("id", user_id).execute()
+        if not res.data:
+            return []
+
+        db_user = res.data[0]
+        now_epoch = int(time.time())
+
+        # Check Pro active
+        pro_sub = db_user.get("pro_subscription") or {}
+        if "subscription_active_till_epoch" in pro_sub:
+            expiry = pro_sub.get("subscription_active_till_epoch", 0)
+            is_pro_active = (expiry == -1) or (expiry > now_epoch)
+        else:
+            is_pro_active = pro_sub.get("is_active", False)
+
+        # Check individually purchased courses
+        pc = db_user.get("purchased_courses") or {}
+        courses_arr = pc.get("courses", []) if isinstance(pc, dict) else []
+        purchased_ids_or_slugs = set()
+        for c in courses_arr:
+            cid = c.get("course_id")
+            if cid:
+                purchased_ids_or_slugs.add(str(cid))
+
+        matched_courses_dict = {}
+
+        # If user has active pro, all active courses with is_pro=True
+        if is_pro_active:
+            pro_res = client.table(CourseService.COURSES_TABLE).select(
+                "id, slug, title, description, category, tags, is_pro, is_popular, price, original_price, status"
+            ).eq("status", "active").eq("is_pro", True).execute()
+            for c in (pro_res.data or []):
+                matched_courses_dict[str(c["id"])] = c
+
+        # Also include individually purchased courses
+        if purchased_ids_or_slugs:
+            all_courses = client.table(CourseService.COURSES_TABLE).select(
+                "id, slug, title, description, category, tags, is_pro, is_popular, price, original_price, status"
+            ).execute()
+            for c in (all_courses.data or []):
+                cid = str(c["id"])
+                cslug = str(c["slug"])
+                if cid in purchased_ids_or_slugs or cslug in purchased_ids_or_slugs:
+                    matched_courses_dict[cid] = c
+
+        results = []
+        for c in matched_courses_dict.values():
+            results.append(CourseBasicResponseSchema(
+                title=c["title"],
+                description=c["description"],
+                id=str(c["id"]),
+                category=c["category"],
+                tags=c.get("tags") or [],
+                is_pro=c.get("is_pro", True),
+                is_popular=c.get("is_popular", False),
+                price=c.get("price", 0),
+                original_price=c.get("original_price", 0),
+                status=c.get("status", "draft"),
+                slug=c["slug"]
+            ))
+        return results
+
+    @staticmethod
+    def get_course_detail(course_id_or_slug: str, is_admin: bool = False) -> CourseDetailResponseSchema:
+        """Fetch all course columns EXCEPT curriculum. Admins can view any status, public can only view active."""
+        client = get_supabase_client()
+
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(course_id_or_slug)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+
+        query = client.table(CourseService.COURSES_TABLE).select("*")
+        if is_uuid:
+            query = query.eq("id", course_id_or_slug)
+        else:
+            query = query.eq("slug", course_id_or_slug)
+
+        if not is_admin:
+            query = query.eq("status", "active")
+
+        res = query.execute()
+        if not res.data or len(res.data) == 0:
+            raise ValueError(f"Course '{course_id_or_slug}' not found or not active")
+
+        course_data = res.data[0]
+        curriculum = course_data.get("curriculum") or []
+
+        # Calculate dynamic counts
+        problems, articles, videos = CourseService._calculate_dynamic_counts(curriculum)
+        course_data["total_problems"] = problems
+        course_data["total_articles"] = articles
+        course_data["total_videos"] = videos
+
+        # Hydrate instructors
+        instructor_ids = course_data.get("instructor_ids") or []
+        course_data["instructors"] = CourseService._hydrate_instructors(instructor_ids, client)
+
+        # Exclude curriculum explicitly from detail response
+        course_data.pop("curriculum", None)
+
+        return CourseDetailResponseSchema(**course_data)
+
+    @staticmethod
+    def get_course_curriculum_by_topic(course_id_or_slug: str, topic: Optional[str] = None, is_admin: bool = False) -> List[CourseSection]:
+        """Fetch curriculum tree for a course. Optionally filters to a single topic/section if topic is provided."""
+        client = get_supabase_client()
+
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(course_id_or_slug)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+
+        query = client.table(CourseService.COURSES_TABLE).select("id, slug, status, curriculum")
+        if is_uuid:
+            query = query.eq("id", course_id_or_slug)
+        else:
+            query = query.eq("slug", course_id_or_slug)
+
+        if not is_admin:
+            query = query.eq("status", "active")
+
+        res = query.execute()
+        if not res.data or len(res.data) == 0:
+            raise ValueError(f"Course '{course_id_or_slug}' not found or not active")
+
+        curriculum = res.data[0].get("curriculum") or []
+        hydrated_curriculum = CourseService._hydrate_curriculum_assets(curriculum, client)
+
+        if topic:
+            import re
+            def normalize(t: str) -> str:
+                return re.sub(r"[^a-zA-Z0-9\s]", "", (t or "").replace("-", " ")).lower().strip()
+
+            clean_topic = normalize(topic)
+            matched_section = None
+            for sec in hydrated_curriculum:
+                clean_title = normalize(sec.get("title") or "")
+                clean_id = normalize(sec.get("id") or "")
+                if clean_topic == clean_id or clean_topic == clean_title or clean_topic in clean_title or clean_title in clean_topic:
+                    matched_section = sec
+                    break
+
+            if not matched_section:
+                raise ValueError(f"Topic '{topic}' not found in course curriculum")
+            return [CourseSection(**matched_section)]
+
+        return [CourseSection(**sec) for sec in hydrated_curriculum]
+
+    @staticmethod
+    def get_course_video(course_id_or_slug: str, section_id: str, item_id: str, user: Optional[Dict[str, Any]]) -> CourseVideoAccessResponse:
+        """Access a specific video item in a course. Free videos are open to all; paid videos require Pro or course purchase."""
+        client = get_supabase_client()
+
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(course_id_or_slug)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+
+        is_admin = False
+        if user and "admin" in (user.get("roles") or []):
+            is_admin = True
+
+        query = client.table(CourseService.COURSES_TABLE).select("*")
+        if is_uuid:
+            query = query.eq("id", course_id_or_slug)
+        else:
+            query = query.eq("slug", course_id_or_slug)
+
+        if not is_admin:
+            query = query.eq("status", "active")
+
+        res = query.execute()
+        if not res.data or len(res.data) == 0:
+            raise ValueError(f"Course '{course_id_or_slug}' not found or not active")
+
+        course = res.data[0]
+        curriculum = course.get("curriculum") or []
+
+        # Locate section and item
+        target_section = None
+        target_item = None
+
+        for sec in curriculum:
+            if str(sec.get("id")) == str(section_id):
+                target_section = sec
+                # Check items in section
+                for itm in (sec.get("items") or []):
+                    if str(itm.get("id")) == str(item_id):
+                        target_item = itm
+                        break
+                # Check subsections
+                if not target_item:
+                    for sub in (sec.get("subsections") or []):
+                        for itm in (sub.get("items") or []):
+                            if str(itm.get("id")) == str(item_id):
+                                target_item = itm
+                                break
+                        if target_item:
+                            break
+                break
+
+        if not target_section or not target_item:
+            raise ValueError(f"Video item '{item_id}' not found in section '{section_id}'")
+
+        if target_item.get("type") != "video":
+            raise ValueError(f"Item '{item_id}' is not a video lecture (type: {target_item.get('type')})")
+
+        is_free = bool(target_item.get("is_free", False))
+
+        # Access control
+        if not is_free:
+            if not user:
+                raise PermissionError("Authentication required to access this video")
+            if not CourseService._check_user_entitlement(user, course, client):
+                raise PermissionError("Access denied: Pro subscription or course purchase required to view this video")
+
+        # Fetch video lecture asset details
+        asset_id = target_item.get("asset_id")
+        vid_res = client.table(CourseService.VIDEOS_TABLE).select("*").eq("id", asset_id).execute()
+        if not vid_res.data or len(vid_res.data) == 0:
+            raise ValueError(f"Video lecture asset '{asset_id}' not found in video library")
+
+        vid_data = vid_res.data[0]
+
+        return CourseVideoAccessResponse(
+            item_id=str(target_item.get("id")),
+            section_id=str(section_id),
+            title=target_item.get("title") or vid_data.get("title") or "Video Lecture",
+            asset_id=str(asset_id),
+            video_url=vid_data.get("video_url", ""),
+            duration_seconds=vid_data.get("duration_seconds", 0),
+            thumbnail_url=vid_data.get("thumbnail_url"),
+            resources=vid_data.get("resources") or {},
+            attributes=vid_data.get("attributes") or {},
+            is_free=is_free,
+            has_access=True
+        )
 
     # ============ ADMIN CRUD OPERATIONS ============
 

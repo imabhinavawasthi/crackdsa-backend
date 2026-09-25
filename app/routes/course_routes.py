@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, status
-from typing import List
+from typing import List, Optional, Dict, Any
 from app.schemas.course import (
     CourseResponseSchema,
     CourseSummaryResponseSchema,
+    CourseBasicResponseSchema,
+    CourseDetailResponseSchema,
+    CourseVideoAccessResponse,
     CourseSection,
     CourseCreateSchema,
     CourseUpdateSchema,
@@ -10,70 +13,163 @@ from app.schemas.course import (
     BatchTopicResponseSchema,
 )
 from app.services.course_service import CourseService
-from app.dependencies import verify_admin_token
+from app.dependencies import verify_admin_token, get_current_user, get_current_user_optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 # --- Public Router ---
-# General student access: only list active courses and retrieve by ID/slug
 public_router = APIRouter(
     prefix="/courses",
     tags=["Courses (Public)"]
 )
 
-@public_router.get("", response_model=List[CourseSummaryResponseSchema])
-@public_router.get("/", response_model=List[CourseSummaryResponseSchema], include_in_schema=False)
-def list_courses_public():
+@public_router.get("", response_model=List[CourseBasicResponseSchema])
+@public_router.get("/", response_model=List[CourseBasicResponseSchema], include_in_schema=False)
+def list_courses_public(include_upcoming: bool = Query(False, description="Set to true to also include upcoming courses alongside active")):
     """
-    Fetch all active SDE preparation courses from the CrackDSA Academy catalog.
+    Fetch active SDE preparation courses with clean basic metadata:
+    title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug
     """
     try:
-        return CourseService.list_courses(all_status=False)
+        return CourseService.list_basic_courses(status="active", include_upcoming=include_upcoming)
     except Exception as e:
-        logger.error(f"Error fetching academy courses: {str(e)}")
+        logger.error(f"Error fetching active courses: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch course catalog"
         )
 
-@public_router.get("/{course_id}", response_model=CourseSummaryResponseSchema)
-@public_router.get("/{course_id}/", response_model=CourseSummaryResponseSchema, include_in_schema=False)
-def get_course_public(course_id: str):
+@public_router.get("/purchased", response_model=List[CourseBasicResponseSchema])
+@public_router.get("/purchased/", response_model=List[CourseBasicResponseSchema], include_in_schema=False)
+def list_purchased_courses(user: Dict[str, Any] = Depends(get_current_user)):
     """
-    Fetch a specific course by its unique ID/slug.
+    Fetch all courses accessible to the authenticated user.
+    If the user has an active Pro subscription, returns all Pro courses plus any individual course purchases.
     """
     try:
-        return CourseService.get_course_summary_by_id(course_id)
+        return CourseService.get_purchased_courses(user)
+    except Exception as e:
+        logger.error(f"Error fetching purchased courses for user {user.get('id')}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch purchased courses"
+        )
+
+@public_router.get("/{course_id_or_slug}", response_model=CourseDetailResponseSchema)
+@public_router.get("/{course_id_or_slug}/", response_model=CourseDetailResponseSchema, include_in_schema=False)
+def get_course_detail(
+    course_id_or_slug: str,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Fetch full course details by unique UUID or SEO slug (every column, but without curriculum).
+    If caller has admin credentials, returns the course regardless of status (active, draft, upcoming).
+    Otherwise returns only if status is 'active'.
+    """
+    is_admin = bool(user and "admin" in (user.get("roles") or []))
+    try:
+        return CourseService.get_course_detail(course_id_or_slug, is_admin=is_admin)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Error fetching course details for '{course_id}': {str(e)}")
+        logger.error(f"Error fetching course details for '{course_id_or_slug}': {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch course details"
         )
 
-@public_router.get("/{course_id}/curriculum", response_model=List[CourseSection])
-def get_course_curriculum_public(course_id: str):
+@public_router.get("/{course_id_or_slug}/curriculum", response_model=List[CourseSection])
+def get_course_curriculum(
+    course_id_or_slug: str,
+    topic: Optional[str] = Query(None, description="Pass topic title or section ID to return only that topic curriculum"),
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     """
-    Fetch only the full curriculum tree for a specific course by its unique ID/slug.
+    Fetch the curriculum tree for a course by UUID or slug.
+    If 'topic' query parameter is provided, returns only that specific topic/section.
     """
+    is_admin = bool(user and "admin" in (user.get("roles") or []))
     try:
-        return CourseService.get_course_curriculum(course_id)
+        return CourseService.get_course_curriculum_by_topic(course_id_or_slug, topic=topic, is_admin=is_admin)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Error fetching curriculum details for '{course_id}': {str(e)}")
+        logger.error(f"Error fetching curriculum for '{course_id_or_slug}': {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch course curriculum"
+        )
+
+@public_router.get("/{course_id_or_slug}/curriculum/topic/{topic_name}", response_model=List[CourseSection])
+def get_course_curriculum_by_topic_path(
+    course_id_or_slug: str,
+    topic_name: str,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Fetch only the specific topic/section curriculum by topic name.
+    """
+    is_admin = bool(user and "admin" in (user.get("roles") or []))
+    try:
+        return CourseService.get_course_curriculum_by_topic(course_id_or_slug, topic=topic_name, is_admin=is_admin)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error fetching topic curriculum for '{course_id_or_slug}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch topic curriculum"
+        )
+
+@public_router.get("/{course_id_or_slug}/video/{section_id}/{item_id}", response_model=CourseVideoAccessResponse)
+def get_course_video_item(
+    course_id_or_slug: str,
+    section_id: str,
+    item_id: str,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
+    """
+    Access video streaming details for a curriculum video item.
+    - Free lectures (is_free=true) are accessible to any user (even unauthenticated).
+    - Paid lectures require an authenticated user with an active Pro subscription or course purchase.
+    """
+    try:
+        return CourseService.get_course_video(
+            course_id_or_slug=course_id_or_slug,
+            section_id=section_id,
+            item_id=item_id,
+            user=user
+        )
+    except PermissionError as e:
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(e)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error fetching video item '{item_id}' in course '{course_id_or_slug}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch video details"
         )
 
 @public_router.post("/{course_id}/batch-topic-details", response_model=BatchTopicResponseSchema)
@@ -91,6 +187,7 @@ def get_batch_topic_details_public(course_id: str, body: BatchTopicRequestSchema
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch batch topic details"
         )
+
 # --- Admin Router ---
 # Full CRUD control: reserved for SDE admins, includes draft/upcoming listings
 admin_router = APIRouter(
@@ -98,15 +195,15 @@ admin_router = APIRouter(
     tags=["Courses (Admin)"]
 )
 
-@admin_router.get("", response_model=List[CourseSummaryResponseSchema])
-@admin_router.get("/", response_model=List[CourseSummaryResponseSchema], include_in_schema=False)
+@admin_router.get("", response_model=List[CourseBasicResponseSchema])
+@admin_router.get("/", response_model=List[CourseBasicResponseSchema], include_in_schema=False)
 def list_courses_admin(admin_user = Depends(verify_admin_token)):
     """
-    List all active + draft + upcoming courses for administrative audit.
+    List all courses (active + draft + upcoming) with basic metadata for administrative audit.
     Requires 'admin' role.
     """
     try:
-        return CourseService.list_courses(all_status=True)
+        return CourseService.list_basic_courses(status=None)
     except Exception as e:
         logger.error(f"Error listing admin course catalog: {str(e)}")
         raise HTTPException(
