@@ -309,12 +309,12 @@ class CourseService:
     @staticmethod
     def list_basic_courses(status: Optional[str] = "active", include_upcoming: bool = False) -> List[CourseBasicResponseSchema]:
         """
-        Fetch courses with basic metadata only:
-        title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug
+        Fetch courses with basic metadata:
+        title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug, totals, metadata
         """
         client = get_supabase_client()
         query = client.table(CourseService.COURSES_TABLE).select(
-            "id, slug, title, description, category, tags, is_pro, is_popular, price, original_price, status"
+            "id, slug, title, description, category, tags, is_pro, is_popular, price, original_price, status, metadata, curriculum"
         )
         if status:
             if status == "active" and include_upcoming:
@@ -325,6 +325,8 @@ class CourseService:
         response = query.order("created_at", desc=False).execute()
         results = []
         for c in (response.data or []):
+            curriculum = c.get("curriculum") or []
+            problems, articles, videos = CourseService._calculate_dynamic_counts(curriculum)
             results.append(CourseBasicResponseSchema(
                 title=c["title"],
                 description=c["description"],
@@ -336,7 +338,11 @@ class CourseService:
                 price=c.get("price", 0),
                 original_price=c.get("original_price", 0),
                 status=c.get("status", "draft"),
-                slug=c["slug"]
+                slug=c["slug"],
+                total_problems=problems,
+                total_videos=videos,
+                total_articles=articles,
+                metadata=c.get("metadata") or {}
             ))
         return results
 

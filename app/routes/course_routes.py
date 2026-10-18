@@ -26,7 +26,7 @@ public_router = APIRouter(
 
 @public_router.get("", response_model=List[CourseBasicResponseSchema])
 @public_router.get("/", response_model=List[CourseBasicResponseSchema], include_in_schema=False)
-def list_courses_public(include_upcoming: bool = Query(False, description="Set to true to also include upcoming courses alongside active")):
+def list_courses_public(include_upcoming: bool = Query(True, description="Set to true to also include upcoming courses alongside active")):
     """
     Fetch active SDE preparation courses with clean basic metadata:
     title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug

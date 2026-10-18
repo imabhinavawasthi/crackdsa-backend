@@ -85,9 +85,14 @@ class CourseBasicResponseSchema(BaseModel):
     original_price: int
     status: str
     slug: str
+    total_problems: int = 0
+    total_videos: int = 0
+    total_articles: int = 0
+    metadata: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
+        extra = "allow"
 
 class CourseDetailResponseSchema(BaseModel):
     id: str

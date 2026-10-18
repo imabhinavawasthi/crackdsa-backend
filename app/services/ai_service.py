@@ -1,14 +1,20 @@
 """AI service using Google Gemini."""
 
 import json
-import google.generativeai as genai
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.config import settings
 from app.models.user_preferences import RoadmapUserInput
 from app.models.roadmap import RoadmapStructure
 
-# Initialize Gemini SDK
-genai.configure(api_key=settings.GEMINI_API_KEY)
+_genai_configured = False
+
+def _get_genai():
+    global _genai_configured
+    import google.generativeai as genai
+    if not _genai_configured:
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        _genai_configured = True
+    return genai
 
 
 async def generate_roadmap_from_ai(prefs: RoadmapUserInput, problems: List[Dict[str, Any]]) -> RoadmapStructure:
@@ -16,6 +22,7 @@ async def generate_roadmap_from_ai(prefs: RoadmapUserInput, problems: List[Dict[
     Sends the user preferences and available problems to Gemini to generate a structured roadmap.
     Uses Gemini's built-in structured output support with the Pydantic RoadmapStructure schema.
     """
+    genai = _get_genai()
     
     system_prompt = (
         "You are an expert personalized Data Structures and Algorithms (DSA) instructor. "
@@ -38,9 +45,10 @@ async def generate_roadmap_from_ai(prefs: RoadmapUserInput, problems: List[Dict[
         "     * 'Competitive Programming': Focus on advanced graph/tree algorithms, math, number theory, and recursion.\n"
         "     * 'Job Switch' / 'Placement' / 'Internship': Emphasize high-frequency interview patterns and FAANG-specific problems.\n"
         "     * 'Promotion': Focus on system design foundations and algorithmic optimizations.\n"
-        "   - Urgency Level:\n"
-        "     * 'Critical': Streamline the plan to cover ONLY the absolute highest-yield topics (DP, Graphs, Trees, Arrays).\n"
-        "     * 'Casual': Give a broad overview with comfortable conceptual coverage.\n"
+        "   - Target Company Tier:\n"
+        "     * 'Tier 1 (FAANG)': Focus on Hard/Medium problems, optimal Big-O bounds, and complex edge cases.\n"
+        "     * 'Tier 2 Product Companies' & 'Tier 3 Companies': Emphasize core data structure mastery, Medium/Easy problems, clean code.\n"
+        "     * 'Service-Based Companies': Prioritize Easy/Medium fundamentals, basic arrays, strings, searching, and sorting.\n"
         "   - Experience Level & Solved Count:\n"
         "     * 'Beginner' or low solved count: Start with fundamental basics (Space/Time complexity, Basic Arrays, Recursion).\n"
         "     * 'Advanced' or high solved count: Skip introductory basics and jump straight to advanced tree/graph patterns and DP.\n"
@@ -81,4 +89,3 @@ Please generate a highly personalized, structured roadmap utilizing the problems
     
     parsed_roadmap = RoadmapStructure.model_validate_json(response.text)
     return parsed_roadmap
-
