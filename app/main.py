@@ -57,6 +57,8 @@ from app.routes.checkout_routes import router as checkout_router
 from app.routes.admin_payments_routes import router as admin_payments_router
 from app.routes.live_class_routes import router as live_class_router
 from app.routes.potd_routes import router as potd_router
+from app.routes.contest_routes import router as contest_router
+from app.routes.cp_sheet_routes import router as cp_sheet_router
 from app.routes.test_routes.auth import router as test_auth_router
 from app.routes.test_routes.rbac import router as test_rbac_router
 app.include_router(roadmap_router, prefix="/api/v1")
@@ -80,6 +82,8 @@ app.include_router(checkout_router, prefix="/api/v1")
 app.include_router(admin_payments_router, prefix="/api/v1")
 app.include_router(live_class_router, prefix="/api/v1")
 app.include_router(potd_router, prefix="/api/v1")
+app.include_router(contest_router, prefix="/api/v1")
+app.include_router(cp_sheet_router, prefix="/api/v1")
 app.include_router(test_auth_router)
 app.include_router(test_rbac_router)
 

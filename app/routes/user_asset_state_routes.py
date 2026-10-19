@@ -35,8 +35,8 @@ def list_user_asset_states(auth_data = Depends(get_current_user_with_token)):
             detail="Failed to fetch user asset states"
         )
 
-@router.post("/{asset_type}/{asset_id}", response_model=UserAssetStateResponseSchema)
-@router.post("/{asset_type}/{asset_id}/", response_model=UserAssetStateResponseSchema, include_in_schema=False)
+@router.post("/{asset_type}/{asset_id:path}", response_model=UserAssetStateResponseSchema)
+@router.post("/{asset_type}/{asset_id:path}/", response_model=UserAssetStateResponseSchema, include_in_schema=False)
 def update_user_asset_state(
     asset_type: AssetTypeEnum,
     asset_id: str,
