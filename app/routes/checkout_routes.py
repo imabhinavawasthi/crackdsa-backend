@@ -6,9 +6,15 @@ import razorpay
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel
-from app.dependencies import get_current_user, get_supabase_client
-from app.schemas.transaction import OrderCreateRequest, OrderCreateResponse, RazorpayWebhookData
+from app.dependencies import get_current_user, get_current_user_optional, get_supabase_client
+from app.schemas.transaction import (
+    OrderCreateRequest,
+    OrderCreateResponse,
+    PaymentVerifyRequest,
+    RazorpayWebhookData,
+)
 from app.schemas.coupon import CouponValidateRequest, CouponValidateResponse
+from app.pro_pricing import PRO_PRICING_CONFIG, get_pro_price, get_pro_duration_days
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,30 +24,47 @@ router = APIRouter(
     tags=["Checkout & Payments"]
 )
 
-# Initialize Razorpay Client
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "TEST_KEY")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "TEST_SECRET")
-RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "TEST_WEBHOOK_SECRET")
-
-rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+# Helper to get dynamically configured Razorpay client
+def get_razorpay_client():
+    key_id = os.environ.get("RAZORPAY_KEY_ID", "TEST_KEY")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET", "TEST_SECRET")
+    client = razorpay.Client(auth=(key_id, key_secret))
+    return client, key_id, key_secret
 
 
 def get_plan_price(purchase_type: str, target_id: Optional[str]) -> float:
-    # Hardcoded prices for now; normally fetched from DB
+    """Resolve price for subscription plans or individual courses."""
     if purchase_type == "pro_subscription":
-        if target_id == "3_months": return 1.0
-        if target_id == "6_months": return 1.0
-        if target_id == "12_months": return 1.0
-        return 1.0
+        return get_pro_price(target_id)
     elif purchase_type == "course":
-        # Assume standard course price
-        return 1
+        if target_id:
+            try:
+                client = get_supabase_client()
+                from uuid import UUID
+                try:
+                    UUID(target_id)
+                    c_res = client.table("courses").select("price").eq("id", target_id).execute()
+                except ValueError:
+                    c_res = client.table("courses").select("price").eq("slug", target_id).execute()
+                if c_res.data and c_res.data[0].get("price") is not None:
+                    return float(c_res.data[0]["price"])
+            except Exception as e:
+                logger.error(f"Error fetching course price: {e}")
+        return 2999.0
     return 0.0
+
+@router.get("/pro-pricing")
+async def get_pro_pricing():
+    """Retrieve active CrackDSA Pro pricing tiers and durations."""
+    return {
+        "plans": {k: v.model_dump() for k, v in PRO_PRICING_CONFIG.items()}
+    }
+
 
 @router.post("/apply-coupon", response_model=CouponValidateResponse)
 async def apply_coupon(
     req: CouponValidateRequest,
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
 ):
     """Validate a coupon and return discount details."""
     client = get_supabase_client()
@@ -87,7 +110,7 @@ async def apply_coupon(
 async def get_eligible_coupons(
     purchase_type: str,
     target_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
 ):
     """Fetch all active coupons applicable for a specific purchase."""
     client = get_supabase_client()
@@ -158,8 +181,8 @@ async def create_order(
                 
     # Create Razorpay Order
     amount_in_paise = int(final_price * 100)
+    rzp_client, current_key_id, _ = get_razorpay_client()
     
-    # In test mode, if keys are invalid, razorpay sdk will throw error
     try:
         rzp_order = rzp_client.order.create({
             "amount": amount_in_paise,
@@ -173,11 +196,11 @@ async def create_order(
         })
     except Exception as e:
         logger.error(f"Razorpay order creation failed: {e}")
-        # For local development without valid keys, return mock order
-        if "TEST_KEY" in RAZORPAY_KEY_ID:
+        if current_key_id == "TEST_KEY":
+            logger.warning("Using mock order simulation due to TEST_KEY placeholder.")
             rzp_order = {"id": f"order_mock_{uuid.uuid4().hex[:8]}"}
         else:
-            raise HTTPException(status_code=500, detail="Failed to create payment gateway order")
+            raise HTTPException(status_code=500, detail=f"Payment gateway order creation failed: {str(e)}")
             
     # Create Transaction Record in Supabase
     tx_data = {
@@ -199,8 +222,127 @@ async def create_order(
         razorpay_order_id=rzp_order["id"],
         amount=final_price,
         currency="INR",
-        transaction_id=tx_id
+        transaction_id=tx_id,
+        razorpay_key_id=current_key_id
     )
+
+
+def fulfill_purchase(client: Any, tx: Dict[str, Any], payment_id: Optional[str] = None):
+    """Safely and idempotently fulfill user access for subscription or course."""
+    # 1. Update transaction status
+    update_data: Dict[str, Any] = {"status": "success"}
+    if payment_id:
+        update_data["razorpay_payment_id"] = payment_id
+    client.table("transactions").update(update_data).eq("id", tx["id"]).execute()
+
+    # 2. Increment coupon uses if applicable
+    if tx.get("coupon_id"):
+        c_res = client.table("coupons").select("used_count").eq("id", tx["coupon_id"]).execute()
+        if c_res.data:
+            client.table("coupons").update({
+                "used_count": c_res.data[0]["used_count"] + 1
+            }).eq("id", tx["coupon_id"]).execute()
+
+    # 3. Grant access in users table
+    user_id = tx["user_id"]
+    user_res = client.table("users").select("*").eq("id", user_id).execute()
+    if not user_res.data:
+        return
+
+    user_row = user_res.data[0]
+    now = datetime.now(timezone.utc)
+
+    if tx["purchase_type"] == "pro_subscription":
+        plan_id = tx.get("target_id")
+        days = get_pro_duration_days(plan_id)
+
+        pro_sub = user_row.get("pro_subscription") or {}
+        all_purchases = pro_sub.get("all_purchases", [])
+
+        # Avoid duplicate purchase entries for this transaction
+        if not any(str(p.get("transaction_id")) == str(tx["id"]) for p in all_purchases):
+            all_purchases.append({
+                "duration_in_days": days,
+                "purchase_date_epoch": int(now.timestamp()),
+                "transaction_id": str(tx["id"])
+            })
+
+        current_expiry_epoch = pro_sub.get("subscription_active_till_epoch", 0)
+
+        if current_expiry_epoch == -1 or days == -1:
+            new_expiry_epoch = -1
+        else:
+            if current_expiry_epoch > int(now.timestamp()):
+                new_expiry_epoch = current_expiry_epoch + (days * 86400)
+            else:
+                new_expiry_epoch = int(now.timestamp()) + (days * 86400)
+
+        pro_sub["all_purchases"] = all_purchases
+        pro_sub["subscription_active_till_epoch"] = new_expiry_epoch
+        client.table("users").update({"pro_subscription": pro_sub}).eq("id", user_id).execute()
+
+    elif tx["purchase_type"] == "course":
+        purchased_courses = user_row.get("purchased_courses") or {}
+        courses_arr = purchased_courses.get("courses", [])
+
+        course_id = tx["target_id"]
+        metadata = tx.get("metadata") or {}
+        course_name = metadata.get("target_name", course_id)
+
+        already_purchased = any(c.get("course_id") == course_id for c in courses_arr)
+        if not already_purchased:
+            courses_arr.append({
+                "course_id": course_id,
+                "purchase_date_epoch": int(now.timestamp()),
+                "valid_till_epoch": -1,
+                "course_name": course_name,
+                "transaction_id": str(tx["id"])
+            })
+            purchased_courses["courses"] = courses_arr
+            client.table("users").update({"purchased_courses": purchased_courses}).eq("id", user_id).execute()
+
+
+@router.post("/verify")
+async def verify_payment(
+    req: PaymentVerifyRequest,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Verify payment signature from client checkout modal and fulfill access immediately."""
+    client = get_supabase_client()
+
+    # Look up transaction
+    tx_res = client.table("transactions").select("*").eq("id", req.transaction_id).execute()
+    if not tx_res.data:
+        # Fallback to razorpay_order_id
+        if req.razorpay_order_id:
+            tx_res = client.table("transactions").select("*").eq("razorpay_order_id", req.razorpay_order_id).execute()
+
+    if not tx_res.data:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    tx = tx_res.data[0]
+
+    # If already fulfilled
+    if tx["status"] == "success":
+        return {"status": "ok", "message": "Transaction already verified and active"}
+
+    # Signature verification (skip if test mock order)
+    if not str(tx.get("razorpay_order_id", "")).startswith("order_mock_"):
+        if req.razorpay_order_id and req.razorpay_payment_id and req.razorpay_signature:
+            rzp_client, _, _ = get_razorpay_client()
+            try:
+                rzp_client.utility.verify_payment_signature({
+                    "razorpay_order_id": req.razorpay_order_id,
+                    "razorpay_payment_id": req.razorpay_payment_id,
+                    "razorpay_signature": req.razorpay_signature,
+                })
+            except Exception as e:
+                logger.error(f"Payment signature verification failed: {e}")
+                raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    fulfill_purchase(client, tx, req.razorpay_payment_id)
+    return {"status": "success", "message": "Payment verified and access activated"}
+
 
 @router.post("/webhook")
 async def razorpay_webhook(request: Request):
@@ -209,23 +351,27 @@ async def razorpay_webhook(request: Request):
     signature = request.headers.get("X-Razorpay-Signature")
     
     client = get_supabase_client()
+    rzp_client, _, _ = get_razorpay_client()
+    webhook_secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "TEST_WEBHOOK_SECRET")
     
     # Verify signature
     try:
-        if "TEST_WEBHOOK_SECRET" not in RAZORPAY_WEBHOOK_SECRET:
-            rzp_client.utility.verify_webhook_signature(body.decode("utf-8"), signature, RAZORPAY_WEBHOOK_SECRET)
+        if "TEST_WEBHOOK_SECRET" not in webhook_secret:
+            rzp_client.utility.verify_webhook_signature(body.decode("utf-8"), signature, webhook_secret)
     except Exception as e:
         logger.error(f"Webhook signature verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid signature")
         
     payload = await request.json()
     
-    if payload.get("event") == "payment.captured":
-        payment_entity = payload["payload"]["payment"]["entity"]
+    if payload.get("event") in ["payment.captured", "order.paid"]:
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
         order_id = payment_entity.get("order_id")
         payment_id = payment_entity.get("id")
         
-        # 1. Update Transaction Table
+        if not order_id and "order" in payload.get("payload", {}):
+            order_id = payload["payload"]["order"]["entity"].get("id")
+        
         tx_res = client.table("transactions").select("*").eq("razorpay_order_id", order_id).execute()
         if not tx_res.data:
             return {"status": "ok", "message": "Transaction not found"}
@@ -234,83 +380,7 @@ async def razorpay_webhook(request: Request):
         if tx["status"] == "success":
             return {"status": "ok", "message": "Already processed"}
             
-        # Mark as success
-        client.table("transactions").update({
-            "status": "success",
-            "razorpay_payment_id": payment_id
-        }).eq("id", tx["id"]).execute()
-        
-        # Increment coupon uses
-        if tx["coupon_id"]:
-            # Basic increment, in a real app use an RPC for atomicity
-            c_res = client.table("coupons").select("used_count").eq("id", tx["coupon_id"]).execute()
-            if c_res.data:
-                client.table("coupons").update({
-                    "used_count": c_res.data[0]["used_count"] + 1
-                }).eq("id", tx["coupon_id"]).execute()
-        
-        # 2. Grant Access in Users Table
-        user_id = tx["user_id"]
-        user_res = client.table("users").select("*").eq("id", user_id).execute()
-        if user_res.data:
-            user_row = user_res.data[0]
-            now = datetime.now(timezone.utc)
-            now_iso = now.isoformat()
-            
-            if tx["purchase_type"] == "pro_subscription":
-                plan_id = tx["target_id"]
-                days = -1
-                if plan_id == "monthly": days = 30
-                elif plan_id == "six-months": days = 180
-                
-                pro_sub = user_row.get("pro_subscription") or {}
-                
-                all_purchases = pro_sub.get("all_purchases", [])
-                
-                purchase_entry = {
-                    "duration_in_days": days,
-                    "purchase_date_epoch": int(now.timestamp()),
-                    "transaction_id": str(tx["id"])
-                }
-                all_purchases.append(purchase_entry)
-                
-                current_expiry_epoch = pro_sub.get("subscription_active_till_epoch", 0)
-                
-                if current_expiry_epoch == -1 or days == -1:
-                    new_expiry_epoch = -1
-                else:
-                    if current_expiry_epoch > int(now.timestamp()):
-                        new_expiry_epoch = current_expiry_epoch + (days * 86400)
-                    else:
-                        new_expiry_epoch = int(now.timestamp()) + (days * 86400)
-                        
-                pro_sub["all_purchases"] = all_purchases
-                pro_sub["subscription_active_till_epoch"] = new_expiry_epoch
-                
-                client.table("users").update({"pro_subscription": pro_sub}).eq("id", user_id).execute()
-                
-            elif tx["purchase_type"] == "course":
-                purchased_courses = user_row.get("purchased_courses") or {}
-                courses_arr = purchased_courses.get("courses", [])
-                
-                course_id = tx["target_id"]
-                metadata = tx.get("metadata") or {}
-                course_name = metadata.get("target_name", course_id)
-                
-                # Check if already purchased
-                already_purchased = any(c.get("course_id") == course_id for c in courses_arr)
-                
-                if not already_purchased:
-                    courses_arr.append({
-                        "course_id": course_id,
-                        "purchase_date_epoch": int(now.timestamp()),
-                        "valid_till_epoch": -1,
-                        "course_name": course_name,
-                        "transaction_id": str(tx["id"])
-                    })
-                    
-                    purchased_courses["courses"] = courses_arr
-                    client.table("users").update({"purchased_courses": purchased_courses}).eq("id", user_id).execute()
+        fulfill_purchase(client, tx, payment_id)
                 
     return {"status": "ok"}
 

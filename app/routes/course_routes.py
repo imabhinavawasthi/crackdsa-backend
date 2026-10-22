@@ -76,10 +76,12 @@ def get_course_detail(
             detail=str(e)
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         logger.error(f"Error fetching course details for '{course_id_or_slug}': {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch course details"
+            detail=f"Failed to fetch course details: {str(e)}"
         )
 
 @public_router.get("/{course_id_or_slug}/curriculum", response_model=List[CourseSection])

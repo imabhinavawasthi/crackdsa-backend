@@ -42,6 +42,13 @@ class OrderCreateResponse(BaseModel):
     amount: float
     currency: str
     transaction_id: UUID
+    razorpay_key_id: Optional[str] = None
+
+class PaymentVerifyRequest(BaseModel):
+    transaction_id: str
+    razorpay_order_id: Optional[str] = None
+    razorpay_payment_id: Optional[str] = None
+    razorpay_signature: Optional[str] = None
     
 class RazorpayWebhookData(BaseModel):
     razorpay_order_id: str
