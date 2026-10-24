@@ -75,26 +75,39 @@ def format_date_str(iso_date: Optional[str]) -> str:
     except Exception:
         return iso_date[:10] if len(iso_date) >= 10 else iso_date
 
-def get_contests(
+def format_platform_name(p: str) -> str:
+    p_lower = p.lower()
+    if p_lower == "codeforces":
+        return "Codeforces"
+    if p_lower == "leetcode":
+        return "LeetCode"
+    if p_lower == "codechef":
+        return "CodeChef"
+    if p_lower == "atcoder":
+        return "AtCoder"
+    return p.capitalize()
+
+def get_contests_paginated(
     platform: Optional[str] = None, 
     search: Optional[str] = None,
+    sort_by: Optional[str] = "latest",
+    limit: int = 10,
+    page: int = 1,
     token: Optional[str] = None
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
-    Fetch all contest summaries grouped by (platform, contest).
+    Fetch contest summaries with complete pagination metadata and aggregated platform statistics.
     """
     client = get_supabase_client(jwt_token=token)
-    query = client.table("contest_editorials").select("*")
-    
-    if platform and platform.lower() != "all":
-        query = query.ilike("platform", f"%{platform}%")
-        
+    select_fields = "contest, platform, created_at, difficulty, video_editorial"
+    query = client.table("contest_editorials").select(select_fields)
     response = query.order("created_at", desc=True).execute()
     rows = response.data or []
-    
-    # Group rows by (platform, contest)
+
     grouped: Dict[str, Dict[str, Any]] = {}
-    
+    platform_counts: Dict[str, int] = {}
+    total_problems = len(rows)
+
     for row in rows:
         c_name = (row.get("contest") or "General Contest").strip()
         p_name = (row.get("platform") or "other").lower().strip()
@@ -117,8 +130,8 @@ def get_contests(
                 "hard_count": 0,
                 "has_video": False,
                 "badge": None,
-                "problems": [],
             }
+            platform_counts[p_name] = platform_counts.get(p_name, 0) + 1
             
         group = grouped[key]
         group["total_problems"] += 1
@@ -131,30 +144,92 @@ def get_contests(
             
         if has_vid:
             group["has_video"] = True
-            
-        group["problems"].append(row)
-        
-    result = list(grouped.values())
-    
+
+    all_contests = list(grouped.values())
+    total_contests = len(all_contests)
+
     # Format date and assign badge to top recent items
-    for idx, item in enumerate(result):
+    for idx, item in enumerate(all_contests):
         item["date"] = format_date_str(item.get("created_at"))
         if idx == 0:
             item["badge"] = "HOT"
         elif idx in [1, 2]:
             item["badge"] = "NEW"
-        # Remove raw problems list from summary for performance
-        item.pop("problems", None)
-        
-    # Search filter if provided
-    if search:
-        s = search.lower()
-        result = [
-            c for c in result 
+
+    platforms_list = [
+        {"id": "all", "label": "All Contests", "count": total_contests}
+    ]
+    for p, cnt in sorted(platform_counts.items(), key=lambda x: -x[1]):
+        platforms_list.append({
+            "id": p,
+            "label": format_platform_name(p),
+            "count": cnt
+        })
+
+    # Filter by platform
+    filtered = all_contests
+    if platform and platform.lower() != "all":
+        p_clean = platform.lower().strip()
+        filtered = [c for c in filtered if p_clean in c["platform"].lower()]
+
+    # Filter by search
+    if search and search.strip():
+        s = search.lower().strip()
+        filtered = [
+            c for c in filtered 
             if s in c["contest"].lower() or s in c["platform"].lower()
         ]
-        
-    return result
+
+    # Sort
+    if sort_by == "oldest":
+        filtered.sort(key=lambda x: x.get("created_at") or "")
+    elif sort_by == "problems":
+        filtered.sort(key=lambda x: x.get("total_problems", 0), reverse=True)
+    else:  # "latest"
+        filtered.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+    total_count = len(filtered)
+    limit = max(1, limit or 10)
+    current_page = max(1, page or 1)
+    total_pages = max(1, (total_count + limit - 1) // limit) if total_count > 0 else 1
+
+    start_idx = (current_page - 1) * limit
+    end_idx = start_idx + limit
+    items = filtered[start_idx:end_idx]
+
+    return {
+        "items": items,
+        "total_count": total_count,
+        "total_pages": total_pages,
+        "page": current_page,
+        "limit": limit,
+        "total_contests": total_contests,
+        "total_problems": total_problems,
+        "platforms": platforms_list,
+    }
+
+def get_contests(
+    platform: Optional[str] = None, 
+    search: Optional[str] = None,
+    sort_by: Optional[str] = "latest",
+    limit: Optional[int] = None,
+    page: Optional[int] = 1,
+    token: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Fetch contest summaries grouped by (platform, contest).
+    Maintains backward compatibility for direct list queries.
+    """
+    effective_limit = limit if limit is not None else 10000
+    res = get_contests_paginated(
+        platform=platform,
+        search=search,
+        sort_by=sort_by,
+        limit=effective_limit,
+        page=page or 1,
+        token=token
+    )
+    return res["items"]
 
 def get_contest_detail(platform: str, contest_slug: str, token: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """

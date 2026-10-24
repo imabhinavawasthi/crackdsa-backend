@@ -4,21 +4,45 @@ from app.schemas.video_lecture import VideoLecture, VideoLectureCreate, VideoLec
 from app.services import video_lecture_service
 from uuid import UUID
 
-async def list_lectures_handler(include_inactive: bool = False, token: str = None) -> List[dict]:
+async def list_lectures_handler(
+    include_inactive: bool = False,
+    user: dict = None,
+    token: str = None
+) -> List[dict]:
     """
-    Controller handler to list video lectures.
+    Controller handler to list video lectures with entitlement filtering.
     """
     try:
-        return video_lecture_service.get_video_lectures(include_inactive=include_inactive, token=token)
+        return video_lecture_service.get_video_lectures(
+            include_inactive=include_inactive,
+            user=user,
+            token=token
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch video lectures: {str(e)}")
 
-async def get_lecture_handler(lecture_id: UUID, include_inactive: bool = False, token: str = None) -> dict:
+async def get_lecture_handler(
+    lecture_id: UUID,
+    include_inactive: bool = False,
+    course_slug: str = None,
+    item_id: str = None,
+    user: dict = None,
+    token: str = None
+) -> dict:
     """
-    Controller handler to retrieve a single lecture by UUID.
+    Controller handler to retrieve a single lecture by UUID with access control.
     """
     try:
-        lecture = video_lecture_service.get_video_lecture_by_id(lecture_id, include_inactive=include_inactive, token=token)
+        lecture = video_lecture_service.get_video_lecture_by_id(
+            lecture_id,
+            include_inactive=include_inactive,
+            course_slug=course_slug,
+            item_id=item_id,
+            user=user,
+            token=token
+        )
         if not lecture:
             raise HTTPException(status_code=404, detail="Video lecture not found")
         return lecture

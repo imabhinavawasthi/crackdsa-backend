@@ -1,9 +1,9 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, Query
 from app.schemas.dsa_sheet import DSASheet, DSASheetCreate, DSASheetUpdate, DSASheetSummary
 from app.schemas.practice_problem import PracticeProblemBasic
 from app.controllers import dsa_sheet_controller
-from app.dependencies import require_role_with_token, get_token
+from app.dependencies import require_role_with_token, get_token, get_current_user_optional
 
 # --- Public Router ---
 # For general users, only GET active sheets
@@ -13,12 +13,22 @@ public_router = APIRouter(
 )
 
 @public_router.get("", response_model=List[DSASheetSummary])
-async def list_sheets_public(token: Optional[str] = Depends(get_token)):
+async def list_sheets_public(
+    limit: Optional[int] = Query(None, ge=1, le=50, description="Limit number of sheets returned"),
+    token: Optional[str] = Depends(get_token),
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+):
     """
     List all active sheets for public users.
-    Enforces RLS if token is present.
+    Enforces RLS if token is present, and calculates solved problem count if authenticated.
     """
-    return await dsa_sheet_controller.list_sheets_handler(include_inactive=False, token=token)
+    user_id = user.get("id") if user else None
+    return await dsa_sheet_controller.list_sheets_handler(
+        include_inactive=False, 
+        limit=limit, 
+        user_id=user_id, 
+        token=token
+    )
 
 @public_router.get("/{id}", response_model=DSASheet)
 async def get_sheet_public(id: str, token: Optional[str] = Depends(get_token)):

@@ -1,8 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends
 from app.schemas.video_lecture import VideoLecture, VideoLectureCreate, VideoLectureUpdate
 from app.controllers import video_lecture_controller
-from app.dependencies import require_role_with_token, get_token
+from app.dependencies import require_role_with_token, get_token, get_current_user_optional
 from uuid import UUID
 
 # --- Public Router ---
@@ -13,18 +13,40 @@ public_router = APIRouter(
 )
 
 @public_router.get("", response_model=List[VideoLecture])
-async def list_lectures_public(token: Optional[str] = Depends(get_token)):
+async def list_lectures_public(
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+    token: Optional[str] = Depends(get_token)
+):
     """
-    List all active video lectures for student discovery.
+    List active video lectures for student discovery.
+    Redacts video_url for non-pro users if lecture is not marked free.
     """
-    return await video_lecture_controller.list_lectures_handler(include_inactive=False, token=token)
+    return await video_lecture_controller.list_lectures_handler(
+        include_inactive=False,
+        user=user,
+        token=token
+    )
 
 @public_router.get("/{id}", response_model=VideoLecture)
-async def get_lecture_public(id: UUID, token: Optional[str] = Depends(get_token)):
+async def get_lecture_public(
+    id: UUID,
+    course_slug: Optional[str] = None,
+    item_id: Optional[str] = None,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+    token: Optional[str] = Depends(get_token)
+):
     """
     Get a single active video lecture by its UUID.
+    Enforces access control: Free lectures are open to all; paid lectures require Pro or course enrollment.
     """
-    return await video_lecture_controller.get_lecture_handler(id, include_inactive=False, token=token)
+    return await video_lecture_controller.get_lecture_handler(
+        id,
+        include_inactive=False,
+        course_slug=course_slug,
+        item_id=item_id,
+        user=user,
+        token=token
+    )
 
 
 # --- Admin Router ---

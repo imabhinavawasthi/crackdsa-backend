@@ -3,9 +3,14 @@ from app.database import get_supabase_client
 from app.schemas.dsa_sheet import DSASheetCreate, DSASheetUpdate
 from fastapi import HTTPException
 
-def get_sheets(include_inactive: bool = False, token: str = None) -> List[dict]:
+def get_sheets(
+    include_inactive: bool = False, 
+    limit: Optional[int] = None, 
+    user_id: Optional[str] = None, 
+    token: str = None
+) -> List[dict]:
     """
-    Fetch DSA sheets from the database.
+    Fetch DSA sheets from the database with problem counts and user solved counts.
     If include_inactive is true, returns all sheets (admin use).
     Otherwise, returns only is_active=True.
     """
@@ -16,22 +21,61 @@ def get_sheets(include_inactive: bool = False, token: str = None) -> List[dict]:
         query = query.eq("is_active", True)
         
     response = query.order("created_at", desc=True).execute()
-    
     sheets = response.data or []
+    
+    # If user_id is provided, fetch user's solved problem IDs & slugs to compute solved_problems count
+    solved_identifiers = set()
+    if user_id:
+        try:
+            import uuid
+            states_res = client.table("user_asset_states").select("asset_id").eq("user_id", str(user_id)).eq("status", "done").eq("asset_type", "problem").execute()
+            done_asset_ids = [r["asset_id"] for r in (states_res.data or []) if r.get("asset_id")]
+            
+            valid_uuids = []
+            for aid in done_asset_ids:
+                aid_str = str(aid).strip()
+                solved_identifiers.add(aid_str)
+                try:
+                    uuid.UUID(aid_str)
+                    valid_uuids.append(aid_str)
+                except ValueError:
+                    pass
+
+            if valid_uuids:
+                for i in range(0, len(valid_uuids), 100):
+                    batch = valid_uuids[i:i + 100]
+                    prob_res = client.table("practice_problems").select("id, slug").in_("id", batch).execute()
+                    for p in (prob_res.data or []):
+                        if p.get("id"):
+                            solved_identifiers.add(str(p["id"]))
+                        if p.get("slug"):
+                            solved_identifiers.add(str(p["slug"]))
+        except Exception:
+            pass
+
     for sheet in sheets:
         sheet_json = sheet.get("sheet_json") or {}
         topics = sheet_json.get("topics", [])
         total_topics = len(topics)
         total_problems = 0
+        solved_count = 0
         for topic in topics:
             for step in topic.get("steps", []):
-                total_problems += len(step.get("problems", []))
+                for prob in step.get("problems", []):
+                    total_problems += 1
+                    pid = str(prob.get("problem_id") or "").strip()
+                    if pid and pid in solved_identifiers:
+                        solved_count += 1
         
         sheet["total_topics"] = total_topics
         sheet["total_problems"] = total_problems
+        sheet["solved_problems"] = solved_count
         # Purge sheet_json to make the response extremely lightweight
         sheet.pop("sheet_json", None)
         
+    if limit is not None and limit > 0:
+        sheets = sheets[:limit]
+
     return sheets
 
 def get_sheet_by_id(sheet_id: str, include_inactive: bool = False, token: str = None) -> Optional[dict]:
@@ -116,13 +160,13 @@ def get_sheet_problems(sheet_id: str, token: str = None) -> List[dict]:
     if not sheet:
         raise HTTPException(status_code=404, detail="Sheet not found")
         
-    problem_slugs = []
+    problem_slugs = set()
     sheet_json = sheet.get("sheet_json", {})
     for topic in sheet_json.get("topics", []):
         for step in topic.get("steps", []):
             for prob in step.get("problems", []):
                 if prob.get("problem_id"):
-                    problem_slugs.append(prob["problem_id"])
+                    problem_slugs.add(str(prob["problem_id"]).strip())
                     
     if not problem_slugs:
         return []
@@ -130,11 +174,16 @@ def get_sheet_problems(sheet_id: str, token: str = None) -> List[dict]:
     client = get_supabase_client(jwt_token=token)
     cols = "id,slug,title,difficulty,platform,problem_url,attributes,is_active,created_at,updated_at"
     
-    # Batch query all slugs.
-    response = client.table("practice_problems") \
-        .select(cols) \
-        .in_("slug", problem_slugs) \
-        .eq("is_active", True) \
-        .execute()
+    # Batch query unique slugs in chunks of 50 to prevent URI length overflows
+    slug_list = list(problem_slugs)
+    all_problems = []
+    for i in range(0, len(slug_list), 50):
+        batch = slug_list[i:i + 50]
+        response = client.table("practice_problems") \
+            .select(cols) \
+            .in_("slug", batch) \
+            .eq("is_active", True) \
+            .execute()
+        all_problems.extend(response.data or [])
         
-    return response.data
+    return all_problems

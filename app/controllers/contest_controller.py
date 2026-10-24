@@ -6,12 +6,42 @@ from app.schemas.contest_editorial import ContestSuggestionCreate
 async def list_contests_handler(
     platform: Optional[str] = None, 
     search: Optional[str] = None, 
+    sort_by: Optional[str] = "latest",
+    limit: Optional[int] = None,
+    page: Optional[int] = 1,
     token: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     try:
-        return contest_service.get_contests(platform=platform, search=search, token=token)
+        return contest_service.get_contests(
+            platform=platform, 
+            search=search, 
+            sort_by=sort_by,
+            limit=limit, 
+            page=page, 
+            token=token
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch contests: {str(e)}")
+
+async def list_contests_paginated_handler(
+    platform: Optional[str] = None, 
+    search: Optional[str] = None, 
+    sort_by: Optional[str] = "latest",
+    limit: int = 10,
+    page: int = 1,
+    token: Optional[str] = None
+) -> Dict[str, Any]:
+    try:
+        return contest_service.get_contests_paginated(
+            platform=platform, 
+            search=search, 
+            sort_by=sort_by,
+            limit=limit, 
+            page=page, 
+            token=token
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch paginated contests: {str(e)}")
 
 async def get_contest_detail_handler(
     platform: str, 

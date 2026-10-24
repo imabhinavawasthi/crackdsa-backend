@@ -202,6 +202,32 @@ async def create_order(
         else:
             raise HTTPException(status_code=500, detail=f"Payment gateway order creation failed: {str(e)}")
             
+    # Ensure user exists in public.users to avoid foreign key violation
+    u_check = client.table("users").select("id").eq("id", user["id"]).execute()
+    if not u_check.data:
+        logger.warning(f"User {user['id']} missing from public.users during checkout. Auto-creating entry.")
+        client.table("users").insert({
+            "id": user["id"],
+            "user_email": user.get("email"),
+            "college": None,
+            "graduation_year": None,
+            "branch": None,
+            "codeforces_id": None,
+            "bookmarked_problems": [],
+            "pending_problems": [],
+            "trying_problems": [],
+            "solved_problems": [],
+            "revise_problems": [],
+            "social_links": {},
+            "metadata": {
+                "full_name": user.get("full_name") or "",
+                "avatar_url": user.get("avatar_url") or "",
+                "onboarding_completed": False
+            },
+            "pro_subscription": {},
+            "purchased_courses": {}
+        }).execute()
+
     # Create Transaction Record in Supabase
     tx_data = {
         "user_id": user["id"],

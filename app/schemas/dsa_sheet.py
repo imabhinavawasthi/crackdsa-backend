@@ -71,6 +71,7 @@ class DSASheetSummary(BaseModel):
     updated_at: datetime
     total_topics: int = 0
     total_problems: int = 0
+    solved_problems: int = 0
 
     class Config:
         from_attributes = True

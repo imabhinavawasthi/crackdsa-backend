@@ -15,6 +15,7 @@ class LiveClassResponseSchema(BaseModel):
     class_url_slug: Optional[str] = ""
     status: Optional[str] = "completed"  # live, upcoming, completed
     visibility: Optional[str] = "public"
+    is_locked: Optional[bool] = False
     thumbnail_url: Optional[str] = None
     class_image: Optional[str] = None
     created_at: Optional[str] = None
@@ -24,6 +25,7 @@ class LiveClassCounts(BaseModel):
     live: int = 0
     upcoming: int = 0
     completed: int = 0
+    free: int = 0
 
 class LiveClassPaginatedResponse(BaseModel):
     items: List[LiveClassResponseSchema]

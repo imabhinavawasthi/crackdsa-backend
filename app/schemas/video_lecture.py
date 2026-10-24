@@ -7,15 +7,17 @@ from uuid import UUID
 class VideoLectureBase(BaseModel):
     title: str
     description: Optional[str] = None
-    video_url: str
+    video_url: Optional[str] = None
     duration_seconds: int = 0
     thumbnail_url: Optional[str] = None
     resources: Dict[str, Any] = Field(default_factory=dict)
     attributes: Dict[str, Any] = Field(default_factory=dict)
+    is_free: Optional[bool] = False
+    is_locked: Optional[bool] = False
 
 # --- Video Lecture Creation Schema ---
 class VideoLectureCreate(VideoLectureBase):
-    pass
+    video_url: str
 
 # --- Video Lecture Update Schema ---
 class VideoLectureUpdate(BaseModel):

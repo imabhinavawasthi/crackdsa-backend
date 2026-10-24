@@ -25,7 +25,9 @@ import os
 allowed_origins = [
     "http://localhost:3000", 
     "http://localhost:3001", 
-    "http://127.0.0.1:3000"
+    "http://127.0.0.1:3000",
+    "https://crackdsa.com",
+    "https://www.crackdsa.com",
 ]
 
 # Add specific FRONTEND_URL if defined in environment
@@ -52,7 +54,13 @@ from app.routes.instructor_routes import public_router as instructor_public_rout
 from app.routes.video_lecture_routes import public_router as video_public_router, admin_router as video_admin_router
 from app.routes.practice_problem_routes import public_router as problem_public_router, admin_router as problem_admin_router
 from app.routes.article_routes import public_router as article_public_router, admin_router as article_admin_router
-from app.routes.user_asset_state_routes import router as user_asset_state_router
+from app.routes.user_asset_state_routes import (
+    router as user_asset_state_router, 
+    activity_router,
+    bookmarks_router,
+    notes_router,
+    progress_router,
+)
 from app.routes.checkout_routes import router as checkout_router
 from app.routes.admin_payments_routes import router as admin_payments_router
 from app.routes.live_class_routes import router as live_class_router
@@ -78,6 +86,10 @@ app.include_router(problem_admin_router, prefix="/api/v1")
 app.include_router(article_public_router, prefix="/api/v1")
 app.include_router(article_admin_router, prefix="/api/v1")
 app.include_router(user_asset_state_router, prefix="/api/v1")
+app.include_router(activity_router, prefix="/api/v1")
+app.include_router(bookmarks_router, prefix="/api/v1")
+app.include_router(notes_router, prefix="/api/v1")
+app.include_router(progress_router, prefix="/api/v1")
 app.include_router(checkout_router, prefix="/api/v1")
 app.include_router(admin_payments_router, prefix="/api/v1")
 app.include_router(live_class_router, prefix="/api/v1")

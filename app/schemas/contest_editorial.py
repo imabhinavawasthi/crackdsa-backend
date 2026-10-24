@@ -33,6 +33,21 @@ class ContestSummary(BaseModel):
     has_video: bool
     badge: Optional[str] = None
 
+class PlatformFilterItem(BaseModel):
+    id: str
+    label: str
+    count: int
+
+class ContestPaginatedResponse(BaseModel):
+    items: List[ContestSummary]
+    total_count: int
+    total_pages: int
+    page: int
+    limit: int
+    total_contests: int
+    total_problems: int
+    platforms: List[PlatformFilterItem]
+
 class ContestDetail(BaseModel):
     id: str
     platform: str

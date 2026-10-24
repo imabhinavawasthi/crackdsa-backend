@@ -3,12 +3,22 @@ from fastapi import HTTPException
 from app.schemas.dsa_sheet import DSASheet, DSASheetCreate, DSASheetUpdate
 from app.services import dsa_sheet_service
 
-async def list_sheets_handler(include_inactive: bool = False, token: str = None) -> List[dict]:
+async def list_sheets_handler(
+    include_inactive: bool = False, 
+    limit: int = None, 
+    user_id: str = None, 
+    token: str = None
+) -> List[dict]:
     """
-    List sheets. Admin can see inactive ones.
+    List sheets. Admin can see inactive ones. Supports limit and user progress calculation.
     """
     try:
-        return dsa_sheet_service.get_sheets(include_inactive=include_inactive, token=token)
+        return dsa_sheet_service.get_sheets(
+            include_inactive=include_inactive, 
+            limit=limit, 
+            user_id=user_id, 
+            token=token
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch sheets: {str(e)}")
 

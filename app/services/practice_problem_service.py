@@ -240,3 +240,22 @@ def get_companies_summary(token: str = None) -> List[dict]:
                 
     # Sort companies by count descending
     return sorted(companies_map.values(), key=lambda x: x["count"], reverse=True)
+
+def get_difficulty_counts(token: str = None) -> dict:
+    """
+    Returns lightweight aggregated difficulty counts (total, easy, medium, hard)
+    without downloading problem metadata or descriptions.
+    """
+    client = get_supabase_client(jwt_token=token)
+    response = client.table("practice_problems").select("difficulty").eq("is_active", True).execute()
+    rows = response.data or []
+    counts = {"total": len(rows), "easy": 0, "medium": 0, "hard": 0}
+    for r in rows:
+        d = (r.get("difficulty") or "Medium").capitalize()
+        if d == "Easy":
+            counts["easy"] += 1
+        elif d == "Hard":
+            counts["hard"] += 1
+        else:
+            counts["medium"] += 1
+    return counts

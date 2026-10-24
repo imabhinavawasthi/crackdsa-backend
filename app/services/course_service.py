@@ -80,7 +80,8 @@ class CourseService:
         if not instructor_ids:
             return []
         try:
-            response = client.table(CourseService.INSTRUCTORS_TABLE).select("*").in_("id", instructor_ids).execute()
+            unique_ids = list(set(instructor_ids))
+            response = client.table(CourseService.INSTRUCTORS_TABLE).select("*").in_("id", unique_ids).execute()
             instructors_map = {item["id"]: item for item in response.data or []}
             
             # Preserve the order defined in instructor_ids
@@ -110,44 +111,63 @@ class CourseService:
         if not curriculum:
             return []
 
-        video_ids = []
-        problem_slugs = []
-        article_slugs = []
+        video_ids = set()
+        problem_slugs = set()
+        article_slugs = set()
 
-        # 1. Harvest all asset IDs/Slugs
+        # 1. Harvest only asset IDs that lack duration_label
         def harvest_items(items):
             for item in items or []:
+                if item.get("duration_label"):
+                    continue
                 t = item.get("type")
                 aid = item.get("asset_id")
                 if not aid:
                     continue
+                aid_str = str(aid).strip()
+                if not aid_str:
+                    continue
                 if t == "video":
-                    video_ids.append(aid)
+                    video_ids.add(aid_str)
                 elif t == "problem":
-                    problem_slugs.append(aid)
+                    problem_slugs.add(aid_str)
                 elif t == "article":
-                    article_slugs.append(aid)
+                    article_slugs.add(aid_str)
 
         for section in curriculum:
             harvest_items(section.get("items"))
             for sub in section.get("subsections") or []:
                 harvest_items(sub.get("items"))
 
-        # 2. Bulk fetch asset attributes
+        # 2. Bulk fetch asset attributes in chunks of 50 to prevent URL length limits
         videos_map = {}
         problems_map = {}
         articles_map = {}
 
         try:
             if video_ids:
-                res = client.table(CourseService.VIDEOS_TABLE).select("id, duration_seconds").in_("id", video_ids).execute()
-                videos_map = {item["id"]: item for item in res.data or []}
+                v_list = list(video_ids)
+                for i in range(0, len(v_list), 50):
+                    batch = v_list[i:i + 50]
+                    res = client.table(CourseService.VIDEOS_TABLE).select("id, duration_seconds").in_("id", batch).execute()
+                    for item in res.data or []:
+                        videos_map[str(item["id"])] = item
+
             if problem_slugs:
-                res = client.table(CourseService.PROBLEMS_TABLE).select("slug, difficulty").in_("slug", problem_slugs).execute()
-                problems_map = {item["slug"]: item for item in res.data or []}
+                p_list = list(problem_slugs)
+                for i in range(0, len(p_list), 50):
+                    batch = p_list[i:i + 50]
+                    res = client.table(CourseService.PROBLEMS_TABLE).select("slug, difficulty").in_("slug", batch).execute()
+                    for item in res.data or []:
+                        problems_map[str(item["slug"])] = item
+
             if article_slugs:
-                res = client.table(CourseService.ARTICLES_TABLE).select("slug, read_time_minutes").in_("slug", article_slugs).execute()
-                articles_map = {item["slug"]: item for item in res.data or []}
+                a_list = list(article_slugs)
+                for i in range(0, len(a_list), 50):
+                    batch = a_list[i:i + 50]
+                    res = client.table(CourseService.ARTICLES_TABLE).select("slug, read_time_minutes").in_("slug", batch).execute()
+                    for item in res.data or []:
+                        articles_map[str(item["slug"])] = item
         except Exception as e:
             logger.error(f"Error fetching curriculum asset metadata: {str(e)}")
 
@@ -160,12 +180,13 @@ class CourseService:
                     continue
                 # If duration_label is omitted/empty, calculate it dynamically from database fields
                 if not item.get("duration_label"):
-                    if t == "video" and aid in videos_map:
-                        item["duration_label"] = CourseService._format_seconds(videos_map[aid].get("duration_seconds", 0))
-                    elif t == "problem" and aid in problems_map:
-                        item["duration_label"] = problems_map[aid].get("difficulty") or "Medium"
-                    elif t == "article" and aid in articles_map:
-                        read_time = articles_map[aid].get("read_time_minutes") or 5
+                    aid_str = str(aid).strip()
+                    if t == "video" and aid_str in videos_map:
+                        item["duration_label"] = CourseService._format_seconds(videos_map[aid_str].get("duration_seconds", 0))
+                    elif t == "problem" and aid_str in problems_map:
+                        item["duration_label"] = problems_map[aid_str].get("difficulty") or "Medium"
+                    elif t == "article" and aid_str in articles_map:
+                        read_time = articles_map[aid_str].get("read_time_minutes") or 5
                         item["duration_label"] = f"{read_time} min read"
 
         for section in curriculum:
@@ -307,7 +328,11 @@ class CourseService:
         return results
 
     @staticmethod
-    def list_basic_courses(status: Optional[str] = "active", include_upcoming: bool = False) -> List[CourseBasicResponseSchema]:
+    def list_basic_courses(
+        status: Optional[str] = "active", 
+        include_upcoming: bool = False,
+        limit: Optional[int] = None,
+    ) -> List[CourseBasicResponseSchema]:
         """
         Fetch courses with basic metadata:
         title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug, totals, metadata
@@ -322,7 +347,7 @@ class CourseService:
             else:
                 query = query.eq("status", status)
 
-        response = query.order("created_at", desc=False).execute()
+        response = query.order("created_at", desc=True).execute()
         results = []
         for c in (response.data or []):
             curriculum = c.get("curriculum") or []
@@ -344,6 +369,8 @@ class CourseService:
                 total_articles=articles,
                 metadata=c.get("metadata") or {}
             ))
+        if limit is not None and limit > 0:
+            results = results[:limit]
         return results
 
     @staticmethod
@@ -480,11 +507,11 @@ class CourseService:
             query = query.eq("slug", course_id_or_slug)
 
         if not is_admin:
-            query = query.eq("status", "active")
+            query = query.in_("status", ["active", "upcoming"])
 
         res = query.execute()
         if not res.data or len(res.data) == 0:
-            raise ValueError(f"Course '{course_id_or_slug}' not found or not active")
+            raise ValueError(f"Course '{course_id_or_slug}' not found")
 
         course_data = res.data[0]
         curriculum = course_data.get("curriculum") or []
@@ -524,11 +551,11 @@ class CourseService:
             query = query.eq("slug", course_id_or_slug)
 
         if not is_admin:
-            query = query.eq("status", "active")
+            query = query.in_("status", ["active", "upcoming"])
 
         res = query.execute()
         if not res.data or len(res.data) == 0:
-            raise ValueError(f"Course '{course_id_or_slug}' not found or not active")
+            raise ValueError(f"Course '{course_id_or_slug}' not found")
 
         curriculum = res.data[0].get("curriculum") or []
         hydrated_curriculum = CourseService._hydrate_curriculum_assets(curriculum, client)
@@ -577,11 +604,11 @@ class CourseService:
             query = query.eq("slug", course_id_or_slug)
 
         if not is_admin:
-            query = query.eq("status", "active")
+            query = query.in_("status", ["active", "upcoming"])
 
         res = query.execute()
         if not res.data or len(res.data) == 0:
-            raise ValueError(f"Course '{course_id_or_slug}' not found or not active")
+            raise ValueError(f"Course '{course_id_or_slug}' not found")
 
         course = res.data[0]
         curriculum = course.get("curriculum") or []
