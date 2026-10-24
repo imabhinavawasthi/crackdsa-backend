@@ -94,14 +94,32 @@ def list_transactions_admin(
     """List transactions with optional filters. In a real app we'd paginate."""
     client = get_supabase_client()
     try:
-        query = client.table("transactions").select("*, users:user_id(email, full_name)").order("created_at", desc=True)
+        query = client.table("transactions").select("*, users:user_id(user_email, metadata)").order("created_at", desc=True)
         if status:
             query = query.eq("status", status)
         if purchase_type:
             query = query.eq("purchase_type", purchase_type)
             
         res = query.execute()
-        return res.data or []
+        raw_items = res.data or []
+
+        # Normalize user information for frontend display
+        transactions = []
+        for tx in raw_items:
+            u = tx.get("users") or {}
+            meta = u.get("metadata") or {}
+            email = u.get("user_email")
+            full_name = meta.get("full_name") or (email.split("@")[0] if email else "User")
+
+            tx["users"] = {
+                "email": email,
+                "user_email": email,
+                "full_name": full_name,
+                "metadata": meta
+            }
+            transactions.append(tx)
+
+        return transactions
     except Exception as e:
         logger.error(f"Error fetching transactions: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch transactions")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch transactions: {str(e)}")

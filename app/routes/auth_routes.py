@@ -35,7 +35,12 @@ oauth_router = APIRouter(
     tags=["Authentication (OAuth Alias)"]
 )
 
-def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any], client: Any) -> Dict[str, Any]:
+def _hydrate_user_profile_response(
+    user: Dict[str, Any], 
+    db_user: Dict[str, Any], 
+    client: Any,
+    is_new_user: bool = False
+) -> Dict[str, Any]:
     now_epoch = int(time.time())
     
     pro_sub = db_user.get("pro_subscription") or {}
@@ -74,6 +79,11 @@ def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any]
             seen_course_ids.add(c["course_id"])
             enrolled_courses.append(c)
             
+    db_metadata = db_user.get("metadata") or {}
+    onboarding_completed = bool(db_metadata.get("onboarding_completed", False))
+    has_college = bool(db_user.get("college"))
+    needs_onboarding = is_new_user or (not onboarding_completed and not has_college)
+
     response_data = {
         **user,
         "college": db_user.get("college") or "",
@@ -81,16 +91,17 @@ def _hydrate_user_profile_response(user: Dict[str, Any], db_user: Dict[str, Any]
         "branch": db_user.get("branch") or "",
         "codeforces_handle": db_user.get("codeforces_id") or "",
         "social_links": db_user.get("social_links") or {},
-        "metadata": db_user.get("metadata") or {},
+        "metadata": db_metadata,
         "is_pro_active": is_pro_active,
         "pro_courses": pro_courses,
         "purchased_courses": purchased_courses,
         "enrolled_courses": enrolled_courses,
         "pro_subscription": pro_sub,
+        "is_new_user": is_new_user,
+        "needs_onboarding": needs_onboarding,
     }
     
     # Override full_name if it is stored in database metadata
-    db_metadata = db_user.get("metadata") or {}
     if "full_name" in db_metadata:
         response_data["full_name"] = db_metadata["full_name"]
         
@@ -104,19 +115,20 @@ async def me(
 ):
     """Get current authenticated user data including profile fields from public.users."""
     try:
+        admin_client = get_supabase_client()  # Service/admin client guarantees RLS bypass and table healing
         client = get_supabase_client(jwt_token=token)  # Scoped user client (RLS-enabled)
         user_id = user["id"]
+        is_new_user = False
         
         # Query public.users table for profile fields by ID
-        res = client.table("users").select(
+        res = admin_client.table("users").select(
             "id, college, graduation_year, branch, codeforces_id, social_links, metadata, pro_subscription, purchased_courses"
         ).eq("id", user_id).execute()
         
         db_user = res.data[0] if res.data and len(res.data) > 0 else {}
         
-        # Self-healing: if not found by ID, search by user_email (may require admin client to align IDs if RLS blocks it)
+        # Self-healing: if not found by ID, search by user_email
         if not db_user:
-            admin_client = get_supabase_client()  # Fallback to Admin client to align IDs
             email_res = admin_client.table("users").select(
                 "id, college, graduation_year, branch, codeforces_id, social_links, metadata, pro_subscription, purchased_courses"
             ).eq("user_email", user["email"]).execute()
@@ -124,15 +136,38 @@ async def me(
                 db_user = email_res.data[0]
                 existing_id = db_user["id"]
                 # Align the ID in the database to match Supabase Auth UUID
-                admin_client.table("users").update({"id": user_id}).eq("id", existing_id).execute()
-                
-                # Re-query using the user's token client after alignment
-                res = client.table("users").select(
-                    "id, college, graduation_year, branch, codeforces_id, social_links, metadata, pro_subscription, purchased_courses"
-                ).eq("id", user_id).execute()
-                db_user = res.data[0] if res.data and len(res.data) > 0 else {}
+                if existing_id != user_id:
+                    admin_client.table("users").update({"id": user_id}).eq("id", existing_id).execute()
+                    db_user["id"] = user_id
+            else:
+                # User does not exist in public.users -> INSERT ROW IMMEDIATELY
+                logger.info(f"User {user['email']} not found in public.users. Creating default user entry.")
+                new_row = {
+                    "id": user_id,
+                    "user_email": user["email"],
+                    "college": None,
+                    "graduation_year": None,
+                    "branch": None,
+                    "codeforces_id": None,
+                    "bookmarked_problems": [],
+                    "pending_problems": [],
+                    "trying_problems": [],
+                    "solved_problems": [],
+                    "revise_problems": [],
+                    "social_links": {},
+                    "metadata": {
+                        "full_name": user.get("full_name") or "",
+                        "avatar_url": user.get("avatar_url") or "",
+                        "onboarding_completed": False
+                    },
+                    "pro_subscription": {},
+                    "purchased_courses": {}
+                }
+                insert_res = admin_client.table("users").insert(new_row).execute()
+                db_user = insert_res.data[0] if insert_res.data else new_row
+                is_new_user = True
         
-        return _hydrate_user_profile_response(user, db_user, client)
+        return _hydrate_user_profile_response(user, db_user, client, is_new_user=is_new_user)
     except Exception as e:
         logger.error(f"Error fetching extended profile for user {user['id']}: {str(e)}")
         # Fallback to standard user response if table query fails
@@ -149,6 +184,8 @@ async def me(
             "purchased_courses": [],
             "enrolled_courses": [],
             "pro_subscription": {},
+            "is_new_user": False,
+            "needs_onboarding": False,
         }
 
 

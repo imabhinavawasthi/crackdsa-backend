@@ -28,6 +28,8 @@ class UserProfileResponse(BaseModel):
     created_at: Optional[str] = Field(None, description="Account creation timestamp (ISO 8601)")
     last_sign_in_at: Optional[str] = Field(None, description="Last login timestamp (ISO 8601)")
     updated_at: Optional[str] = Field(None, description="Last update timestamp (ISO 8601)")
+    is_new_user: Optional[bool] = Field(False, description="Flag indicating if the user was just registered in public.users")
+    needs_onboarding: Optional[bool] = Field(False, description="Flag indicating if the user needs to complete onboarding details")
 
 class ProfileUpdateSchema(BaseModel):
     full_name: Optional[str] = Field(None, description="Full display name")
