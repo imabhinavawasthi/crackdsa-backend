@@ -26,13 +26,16 @@ public_router = APIRouter(
 
 @public_router.get("", response_model=List[CourseBasicResponseSchema])
 @public_router.get("/", response_model=List[CourseBasicResponseSchema], include_in_schema=False)
-def list_courses_public(include_upcoming: bool = Query(True, description="Set to true to also include upcoming courses alongside active")):
+def list_courses_public(
+    include_upcoming: bool = Query(True, description="Set to true to also include upcoming courses alongside active"),
+    limit: Optional[int] = Query(None, ge=1, le=50, description="Limit number of courses returned"),
+):
     """
     Fetch active SDE preparation courses with clean basic metadata:
     title, description, id, category, tags, is_pro, is_popular, price, original_price, status, slug
     """
     try:
-        return CourseService.list_basic_courses(status="active", include_upcoming=include_upcoming)
+        return CourseService.list_basic_courses(status="active", include_upcoming=include_upcoming, limit=limit)
     except Exception as e:
         logger.error(f"Error fetching active courses: {str(e)}")
         raise HTTPException(

@@ -28,6 +28,14 @@ async def list_problems_public(
         offset=offset
     )
 
+@public_router.get("/difficulty-counts")
+async def get_difficulty_counts_route(token: Optional[str] = Depends(get_token)):
+    """
+    Get aggregated difficulty counts (total, easy, medium, hard) without loading all problems.
+    """
+    from app.services.practice_problem_service import get_difficulty_counts
+    return get_difficulty_counts(token=token)
+
 @public_router.get("/topics-summary")
 async def get_topics_summary_route(token: Optional[str] = Depends(get_token)):
     """

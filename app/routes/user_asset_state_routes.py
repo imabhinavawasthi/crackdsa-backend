@@ -4,6 +4,10 @@ from app.dependencies import get_current_user, get_current_user_with_token
 from app.schemas.user_asset_state import (
     UserAssetStateResponseSchema,
     UserAssetStateUpdateSchema,
+    UserActivitySummarySchema,
+    UserBookmarkItemSchema,
+    UserNoteItemSchema,
+    UserProgressSummarySchema,
     AssetTypeEnum,
 )
 from app.services.user_asset_state_service import UserAssetStateService
@@ -15,6 +19,105 @@ router = APIRouter(
     prefix="/user/assets/states",
     tags=["User Asset Progress & Notepad"]
 )
+
+activity_router = APIRouter(
+    prefix="/user/activity",
+    tags=["User Activity & Streaks"]
+)
+
+bookmarks_router = APIRouter(
+    prefix="/user/bookmarks",
+    tags=["User Bookmarks"]
+)
+
+notes_router = APIRouter(
+    prefix="/user/notes",
+    tags=["User Notes"]
+)
+
+progress_router = APIRouter(
+    prefix="/user/progress",
+    tags=["User Progress"]
+)
+
+@bookmarks_router.get("", response_model=list[UserBookmarkItemSchema])
+@bookmarks_router.get("/", response_model=list[UserBookmarkItemSchema], include_in_schema=False)
+def get_user_bookmarks_route(auth_data = Depends(get_current_user_with_token)):
+    current_user = auth_data["user"]
+    token = auth_data["token"]
+    try:
+        user_uuid = UUID(current_user["id"])
+        return UserAssetStateService.get_user_bookmarks(user_uuid, token)
+    except Exception as e:
+        logger.error(f"Error fetching bookmarks for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user bookmarks"
+        )
+
+@notes_router.get("", response_model=list[UserNoteItemSchema])
+@notes_router.get("/", response_model=list[UserNoteItemSchema], include_in_schema=False)
+def get_user_notes_route(auth_data = Depends(get_current_user_with_token)):
+    current_user = auth_data["user"]
+    token = auth_data["token"]
+    try:
+        user_uuid = UUID(current_user["id"])
+        return UserAssetStateService.get_user_notes(user_uuid, token)
+    except Exception as e:
+        logger.error(f"Error fetching notes for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user notes"
+        )
+
+@progress_router.get("/summary", response_model=UserProgressSummarySchema)
+@progress_router.get("/summary/", response_model=UserProgressSummarySchema, include_in_schema=False)
+def get_user_progress_summary_route(auth_data = Depends(get_current_user_with_token)):
+    current_user = auth_data["user"]
+    token = auth_data["token"]
+    try:
+        user_uuid = UUID(current_user["id"])
+        return UserAssetStateService.get_user_progress_summary(user_uuid, token)
+    except Exception as e:
+        logger.error(f"Error fetching progress summary for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user progress summary"
+        )
+
+@activity_router.get("/summary", response_model=UserActivitySummarySchema)
+@activity_router.get("/summary/", response_model=UserActivitySummarySchema, include_in_schema=False)
+def get_user_activity_summary(auth_data = Depends(get_current_user_with_token)):
+    """
+    Fetch lightweight activity and streak summary (current streak, best streak,
+    and current month active dates) calculated on the server.
+    """
+    current_user = auth_data["user"]
+    token = auth_data["token"]
+    try:
+        user_uuid = UUID(current_user["id"])
+        return UserAssetStateService.get_user_activity_summary(user_uuid, token)
+    except Exception as e:
+        logger.error(f"Error fetching activity summary for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user activity summary"
+        )
+
+@router.get("/summary", response_model=UserActivitySummarySchema)
+@router.get("/summary/", response_model=UserActivitySummarySchema, include_in_schema=False)
+def get_user_asset_states_summary(auth_data = Depends(get_current_user_with_token)):
+    current_user = auth_data["user"]
+    token = auth_data["token"]
+    try:
+        user_uuid = UUID(current_user["id"])
+        return UserAssetStateService.get_user_activity_summary(user_uuid, token)
+    except Exception as e:
+        logger.error(f"Error fetching activity summary for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user activity summary"
+        )
 
 @router.get("", response_model=list[UserAssetStateResponseSchema])
 @router.get("/", response_model=list[UserAssetStateResponseSchema], include_in_schema=False)

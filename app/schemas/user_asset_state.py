@@ -40,3 +40,58 @@ class UserAssetStateUpdateSchema(BaseModel):
     is_bookmarked: Optional[bool] = None
     notes: Optional[List[NoteSchema]] = None
     metadata: Optional[dict] = None
+
+class UserActivitySummarySchema(BaseModel):
+    current_streak: int
+    max_streak: int
+    current_month: str
+    month_active_dates: List[str]
+    month_active_count: int
+    total_active_days: int
+    completed_lessons_count: int = 0
+    cp_solved_count: int = 0
+
+class UserBookmarkItemSchema(BaseModel):
+    asset_id: str
+    asset_type: str
+    title: str
+    subtitle: str
+    href: str
+    badge: Optional[str] = None
+    badge_color: Optional[str] = None
+    difficulty: Optional[str] = None
+    status: Optional[str] = "pending"
+    bookmarked_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    notes_count: int = 0
+    metadata: dict = {}
+
+class UserNoteItemSchema(BaseModel):
+    id: str
+    text: str
+    created_at: str
+    asset_id: str
+    asset_type: str
+    title: str
+    subtitle: str
+    href: str
+    badge: Optional[str] = None
+    badge_color: Optional[str] = None
+    status: Optional[str] = "pending"
+
+class ProblemDifficultyStatsSchema(BaseModel):
+    total: int = 0
+    easy: int = 0
+    medium: int = 0
+    hard: int = 0
+
+class UserProgressSummarySchema(BaseModel):
+    problems_solved: ProblemDifficultyStatsSchema
+    total_problems: ProblemDifficultyStatsSchema
+    articles_read: int = 0
+    lectures_completed: int = 0
+    bookmarked_count: int = 0
+    streak: int = 0
+    recent_bookmarks: List[UserBookmarkItemSchema] = []
+    recent_notes: List[UserNoteItemSchema] = []
+    heatmap_activity: dict = {}
