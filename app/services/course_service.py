@@ -1,4 +1,5 @@
 from app.database import get_supabase_client
+from app.utils.cache import cache_manager
 from app.schemas.course import (
     CourseCreateSchema,
     CourseUpdateSchema,
@@ -199,6 +200,11 @@ class CourseService:
     @staticmethod
     def get_course_summary_by_id(course_id_or_slug: str) -> CourseSummaryResponseSchema:
         """Fetch a specific course summary by UUID or slug, without full curriculum hydration"""
+        cache_key = f"courses:summary:{course_id_or_slug}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
         
         # Check if the query is a valid UUID to decide which column to query
@@ -231,7 +237,9 @@ class CourseService:
         instructor_ids = course_data.get("instructor_ids") or []
         course_data["instructors"] = CourseService._hydrate_instructors(instructor_ids, client)
 
-        return CourseSummaryResponseSchema(**course_data)
+        result = CourseSummaryResponseSchema(**course_data)
+        cache_manager.set(cache_key, result, ttl=86400, namespace="courses")
+        return result
 
     @staticmethod
     def get_course_by_id(course_id_or_slug: str) -> CourseResponseSchema:
@@ -272,6 +280,11 @@ class CourseService:
     @staticmethod
     def get_course_curriculum(course_id_or_slug: str) -> List[CourseSection]:
         """Fetch only the curriculum tree for a specific course by UUID or slug"""
+        cache_key = f"courses:curriculum:{course_id_or_slug}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
         
         from uuid import UUID
@@ -295,11 +308,18 @@ class CourseService:
         # Hydrate assets
         hydrated_curriculum = CourseService._hydrate_curriculum_assets(curriculum, client)
         
-        return [CourseSection(**sec) for sec in hydrated_curriculum]
+        result = [CourseSection(**sec) for sec in hydrated_curriculum]
+        cache_manager.set(cache_key, result, ttl=86400, namespace="courses")
+        return result
 
     @staticmethod
     def list_courses(all_status: bool = False) -> List[CourseSummaryResponseSchema]:
         """Fetch active courses and dynamically populate instructor lists and item counts"""
+        cache_key = f"courses:list:{all_status}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
         
         query = client.table(CourseService.COURSES_TABLE).select("*").eq("is_active", True)
@@ -325,6 +345,7 @@ class CourseService:
             # Avoid full asset hydration for general course list to optimize performance
             results.append(CourseSummaryResponseSchema(**course_data))
             
+        cache_manager.set(cache_key, results, ttl=86400, namespace="courses")
         return results
 
     @staticmethod
@@ -490,6 +511,11 @@ class CourseService:
     @staticmethod
     def get_course_detail(course_id_or_slug: str, is_admin: bool = False) -> CourseDetailResponseSchema:
         """Fetch all course columns EXCEPT curriculum. Admins can view any status, public can only view active."""
+        cache_key = f"courses:detail:{course_id_or_slug}:{is_admin}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
 
         from uuid import UUID
@@ -529,11 +555,18 @@ class CourseService:
         # Exclude curriculum explicitly from detail response
         course_data.pop("curriculum", None)
 
-        return CourseDetailResponseSchema(**course_data)
+        result = CourseDetailResponseSchema(**course_data)
+        cache_manager.set(cache_key, result, ttl=86400, namespace="courses")
+        return result
 
     @staticmethod
     def get_course_curriculum_by_topic(course_id_or_slug: str, topic: Optional[str] = None, is_admin: bool = False) -> List[CourseSection]:
         """Fetch curriculum tree for a course. Optionally filters to a single topic/section if topic is provided."""
+        cache_key = f"courses:curriculum_topic:{course_id_or_slug}:{topic}:{is_admin}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
 
         from uuid import UUID
@@ -576,9 +609,13 @@ class CourseService:
 
             if not matched_section:
                 raise ValueError(f"Topic '{topic}' not found in course curriculum")
-            return [CourseSection(**matched_section)]
+            result = [CourseSection(**matched_section)]
+            cache_manager.set(cache_key, result, ttl=86400, namespace="courses")
+            return result
 
-        return [CourseSection(**sec) for sec in hydrated_curriculum]
+        result = [CourseSection(**sec) for sec in hydrated_curriculum]
+        cache_manager.set(cache_key, result, ttl=86400, namespace="courses")
+        return result
 
     @staticmethod
     def get_course_video(course_id_or_slug: str, section_id: str, item_id: str, user: Optional[Dict[str, Any]]) -> CourseVideoAccessResponse:
@@ -713,6 +750,7 @@ class CourseService:
         course_data["total_videos"] = videos
         course_data["instructors"] = CourseService._hydrate_instructors(course_data.get("instructor_ids") or [], client)
         
+        cache_manager.invalidate_namespace("courses")
         return CourseResponseSchema(**course_data)
 
     @staticmethod
@@ -764,6 +802,7 @@ class CourseService:
         course_data["total_videos"] = videos
         course_data["instructors"] = CourseService._hydrate_instructors(course_data.get("instructor_ids") or [], client)
         
+        cache_manager.invalidate_namespace("courses")
         return CourseResponseSchema(**course_data)
 
     @staticmethod
@@ -776,6 +815,7 @@ class CourseService:
         else:
             client.table(CourseService.COURSES_TABLE).update({"is_active": False, "updated_at": "now()"}).eq("id", course_id).execute()
             
+        cache_manager.invalidate_namespace("courses")
         logger.info(f"Deleted course: {course_id} (hard={hard_delete})")
         return True
 
@@ -784,6 +824,12 @@ class CourseService:
         """
         Fetch details for multiple topics in a single call by matching section titles case-insensitively and trimmed.
         """
+        sorted_topics_key = ",".join(sorted(topics or []))
+        cache_key = f"courses:batch_topics:{course_id_or_slug}:{sorted_topics_key}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
         
         from uuid import UUID
@@ -881,8 +927,10 @@ class CourseService:
                     "is_upcoming": True,
                 }
 
-        return {
+        result = {
             "course_slug": course_slug,
             "matched_topics": matched_topics,
         }
+        cache_manager.set(cache_key, result, ttl=86400, namespace="courses")
+        return result
 

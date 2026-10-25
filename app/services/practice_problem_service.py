@@ -1,6 +1,7 @@
 from typing import List, Optional
 from app.database import get_supabase_client
 from app.schemas.practice_problem import PracticeProblemCreate, PracticeProblemUpdate
+from app.utils.cache import cache_manager
 from fastapi import HTTPException
 from uuid import UUID
 
@@ -50,6 +51,11 @@ def get_practice_problem_by_id(problem_id: UUID, include_inactive: bool = False,
     """
     Fetch a single practice problem by its UUID.
     """
+    cache_key = f"problems:detail:id:{problem_id}:{include_inactive}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     query = client.table("practice_problems").select("*").eq("id", str(problem_id))
     
@@ -57,12 +63,20 @@ def get_practice_problem_by_id(problem_id: UUID, include_inactive: bool = False,
         query = query.eq("is_active", True)
         
     response = query.limit(1).execute()
-    return response.data[0] if response.data else None
+    result = response.data[0] if response.data else None
+    if result is not None:
+        cache_manager.set(cache_key, result, ttl=86400, namespace="problems")
+    return result
 
 def get_practice_problem_by_slug(slug: str, include_inactive: bool = False, token: str = None) -> Optional[dict]:
     """
     Fetch a single practice problem by its unique slug.
     """
+    cache_key = f"problems:detail:slug:{slug}:{include_inactive}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     query = client.table("practice_problems").select("*").eq("slug", slug)
     
@@ -70,7 +84,10 @@ def get_practice_problem_by_slug(slug: str, include_inactive: bool = False, toke
         query = query.eq("is_active", True)
         
     response = query.limit(1).execute()
-    return response.data[0] if response.data else None
+    result = response.data[0] if response.data else None
+    if result is not None:
+        cache_manager.set(cache_key, result, ttl=86400, namespace="problems")
+    return result
 
 def create_practice_problem(problem_data: PracticeProblemCreate, token: str = None) -> dict:
     """
@@ -85,6 +102,7 @@ def create_practice_problem(problem_data: PracticeProblemCreate, token: str = No
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to create practice problem")
         
+    cache_manager.invalidate_namespace("problems")
     return response.data[0]
 
 def update_practice_problem(problem_id: UUID, update_data: PracticeProblemUpdate, token: str = None) -> dict:
@@ -109,6 +127,7 @@ def update_practice_problem(problem_id: UUID, update_data: PracticeProblemUpdate
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Practice problem with id {problem_id} not found or inactive")
         
+    cache_manager.invalidate_namespace("problems")
     return response.data[0]
 
 def soft_delete_practice_problem(problem_id: UUID, token: str = None) -> bool:
@@ -125,6 +144,7 @@ def soft_delete_practice_problem(problem_id: UUID, token: str = None) -> bool:
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Practice problem with id {problem_id} not found")
         
+    cache_manager.invalidate_namespace("problems")
     return True
 
 def slugify(text: str) -> str:
@@ -167,6 +187,11 @@ def get_topics_summary(token: str = None) -> List[dict]:
     """
     Computes a summary of all topic tags with their active problem counts.
     """
+    cache_key = "problems:topics_summary"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     problems = get_practice_problems_basic(include_inactive=False, token=token)
     topics_map = {}
     
@@ -200,12 +225,19 @@ def get_topics_summary(token: str = None) -> List[dict]:
                 topics_map[slug]["hard_count"] += 1
                 
     # Sort topics by count descending
-    return sorted(topics_map.values(), key=lambda x: x["count"], reverse=True)
+    result = sorted(topics_map.values(), key=lambda x: x["count"], reverse=True)
+    cache_manager.set(cache_key, result, ttl=86400, namespace="problems")
+    return result
 
 def get_companies_summary(token: str = None) -> List[dict]:
     """
     Computes a summary of all company tags with their active problem counts.
     """
+    cache_key = "problems:companies_summary"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     problems = get_practice_problems_basic(include_inactive=False, token=token)
     companies_map = {}
     
@@ -239,13 +271,20 @@ def get_companies_summary(token: str = None) -> List[dict]:
                 companies_map[slug]["hard_count"] += 1
                 
     # Sort companies by count descending
-    return sorted(companies_map.values(), key=lambda x: x["count"], reverse=True)
+    result = sorted(companies_map.values(), key=lambda x: x["count"], reverse=True)
+    cache_manager.set(cache_key, result, ttl=86400, namespace="problems")
+    return result
 
 def get_difficulty_counts(token: str = None) -> dict:
     """
     Returns lightweight aggregated difficulty counts (total, easy, medium, hard)
     without downloading problem metadata or descriptions.
     """
+    cache_key = "problems:difficulty_counts"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     response = client.table("practice_problems").select("difficulty").eq("is_active", True).execute()
     rows = response.data or []
@@ -258,4 +297,5 @@ def get_difficulty_counts(token: str = None) -> dict:
             counts["hard"] += 1
         else:
             counts["medium"] += 1
+    cache_manager.set(cache_key, counts, ttl=86400, namespace="problems")
     return counts

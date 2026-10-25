@@ -1,5 +1,6 @@
 from app.database import get_supabase_client
 from app.utils.crypto import encrypt_media_url
+from app.utils.cache import cache_manager
 from app.schemas.live_class import (
     LiveClassResponseSchema,
     LiveClassPaginatedResponse,
@@ -68,6 +69,11 @@ class LiveClassService:
     @classmethod
     def get_public_topics(cls) -> List[str]:
         """Fetch all unique topics present in public and free videos"""
+        cache_key = "live_classes:topics"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         try:
             client = get_supabase_client()
             res = client.table(cls.TABLE_NAME).select("class_topic").in_("visibility", ["public", "free"]).execute()
@@ -76,7 +82,9 @@ class LiveClassService:
                 t = (r.get("class_topic") or "").strip().lower()
                 if t:
                     topics.add(t)
-            return sorted(list(topics))
+            result = sorted(list(topics))
+            cache_manager.set(cache_key, result, ttl=86400, namespace="live_classes")
+            return result
         except Exception as e:
             logger.error(f"Error fetching public topics: {e}")
             return []
@@ -93,6 +101,13 @@ class LiveClassService:
         user: Optional[Dict[str, Any]] = None,
     ) -> LiveClassPaginatedResponse:
         """Fetch live classes with pagination, search, topic filter, and visibility enforcement"""
+        now = int(time.time())
+        has_pro_access = cls._is_user_pro_or_admin(user, now)
+        cache_key = f"live_classes:list:{status_filter}:{topic}:{search}:{visibility}:{page}:{limit}:{has_pro_access}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
 
         # Build base query - fetch both public and free classes
@@ -168,7 +183,7 @@ class LiveClassService:
         # Apply Pro access lock (redacting private recording, link, notes for non-pro on non-free classes)
         paginated_items = [cls._apply_pro_lock(c, has_pro_access) for c in paginated_raw]
 
-        return LiveClassPaginatedResponse(
+        result = LiveClassPaginatedResponse(
             items=paginated_items,
             total_count=total_count,
             page=page_clamped,
@@ -178,6 +193,8 @@ class LiveClassService:
             available_topics=available_topics,
             upcoming_classes=upcoming_classes,
         )
+        cache_manager.set(cache_key, result, ttl=86400, namespace="live_classes")
+        return result
 
     @classmethod
     def get_dashboard_featured_class(
@@ -191,6 +208,13 @@ class LiveClassService:
         3. Only 1 last class detail (most recent completed)
         Applies Pro verification: if non-pro and class is not free, sensitive links are redacted.
         """
+        now = int(time.time())
+        has_pro_access = cls._is_user_pro_or_admin(user, now)
+        cache_key = f"live_classes:featured:{has_pro_access}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
         select_fields = "id, class_name, class_topic, instructor_name, class_time_epoch, class_duration, class_link, class_recording, class_notes, class_subtopics, class_url_slug, visibility, created_at"
 
@@ -229,7 +253,9 @@ class LiveClassService:
             return None
 
         has_pro_access = cls._is_user_pro_or_admin(user, now)
-        return cls._apply_pro_lock(chosen, has_pro_access)
+        result = cls._apply_pro_lock(chosen, has_pro_access)
+        cache_manager.set(cache_key, result, ttl=86400, namespace="live_classes")
+        return result
 
     @classmethod
     def _is_user_pro_or_admin(cls, user: Optional[Dict[str, Any]], now: int) -> bool:
@@ -302,6 +328,13 @@ class LiveClassService:
         user: Optional[Dict[str, Any]] = None
     ) -> Optional[LiveClassResponseSchema]:
         """Fetch single live class by UUID or slug without any mock data"""
+        now = int(time.time())
+        has_pro_access = cls._is_user_pro_or_admin(user, now)
+        cache_key = f"live_classes:detail:{id_or_slug}:{has_pro_access}"
+        cached_val = cache_manager.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
         client = get_supabase_client()
         from uuid import UUID
         is_uuid = False
@@ -323,4 +356,11 @@ class LiveClassService:
         now = int(time.time())
         hydrated = cls._hydrate_class_metadata(res.data[0], now)
         has_pro_access = cls._is_user_pro_or_admin(user, now)
-        return cls._apply_pro_lock(hydrated, has_pro_access)
+        result = cls._apply_pro_lock(hydrated, has_pro_access)
+        cache_manager.set(cache_key, result, ttl=86400, namespace="live_classes")
+        return result
+
+    @classmethod
+    def invalidate_cache(cls) -> int:
+        """Invalidates all cached live classes data."""
+        return cache_manager.invalidate_namespace("live_classes")

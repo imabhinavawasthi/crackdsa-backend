@@ -1,6 +1,7 @@
 from typing import List, Optional
 from app.database import get_supabase_client
 from app.schemas.dsa_sheet import DSASheetCreate, DSASheetUpdate
+from app.utils.cache import cache_manager
 from fastapi import HTTPException
 
 def get_sheets(
@@ -14,6 +15,11 @@ def get_sheets(
     If include_inactive is true, returns all sheets (admin use).
     Otherwise, returns only is_active=True.
     """
+    cache_key = f"dsa_sheets:user:{user_id}:{include_inactive}:{limit}" if user_id else f"dsa_sheets:all:{include_inactive}:{limit}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     query = client.table("dsa_sheets").select("*")
     
@@ -76,12 +82,19 @@ def get_sheets(
     if limit is not None and limit > 0:
         sheets = sheets[:limit]
 
+    ttl = 86400
+    cache_manager.set(cache_key, sheets, ttl=ttl, namespace="sheets")
     return sheets
 
 def get_sheet_by_id(sheet_id: str, include_inactive: bool = False, token: str = None) -> Optional[dict]:
     """
     Fetch a single sheet by id. Admin can see inactive sheets.
     """
+    cache_key = f"dsa_sheet:{sheet_id}:{include_inactive}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     query = client.table("dsa_sheets").select("*").eq("id", sheet_id)
     
@@ -90,8 +103,10 @@ def get_sheet_by_id(sheet_id: str, include_inactive: bool = False, token: str = 
         
     # Using limit(1) instead of single() to avoid PGRST116 error when 0 rows exist
     response = query.limit(1).execute()
-    
-    return response.data[0] if response.data else None
+    result = response.data[0] if response.data else None
+    if result:
+        cache_manager.set(cache_key, result, ttl=86400, namespace="sheets")
+    return result
 
 def create_sheet(sheet_data: DSASheetCreate, token: str = None) -> dict:
     """
@@ -108,6 +123,7 @@ def create_sheet(sheet_data: DSASheetCreate, token: str = None) -> dict:
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to create DSA sheet")
     
+    cache_manager.invalidate_namespace("sheets")
     return response.data[0]
 
 def update_sheet(sheet_id: str, update_data: DSASheetUpdate, token: str = None) -> dict:
@@ -134,6 +150,7 @@ def update_sheet(sheet_id: str, update_data: DSASheetUpdate, token: str = None) 
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Sheet with id {sheet_id} not found or inactive")
     
+    cache_manager.invalidate_namespace("sheets")
     return response.data[0]
 
 def soft_delete_sheet(sheet_id: str, token: str = None) -> bool:
@@ -150,12 +167,18 @@ def soft_delete_sheet(sheet_id: str, token: str = None) -> bool:
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Sheet with id {sheet_id} not found")
         
+    cache_manager.invalidate_namespace("sheets")
     return True
 
 def get_sheet_problems(sheet_id: str, token: str = None) -> List[dict]:
     """
     Fetch all practice problems detailed info for a specific DSA sheet.
     """
+    cache_key = f"dsa_sheet_problems:{sheet_id}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     sheet = get_sheet_by_id(sheet_id, include_inactive=False, token=token)
     if not sheet:
         raise HTTPException(status_code=404, detail="Sheet not found")
@@ -186,4 +209,5 @@ def get_sheet_problems(sheet_id: str, token: str = None) -> List[dict]:
             .execute()
         all_problems.extend(response.data or [])
         
+    cache_manager.set(cache_key, all_problems, ttl=86400, namespace="sheets")
     return all_problems

@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import get_supabase_client, check_database_connection
+from app.utils.keep_alive import keep_alive_manager
 from datetime import datetime
 import logging
 
@@ -46,6 +47,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def track_activity_middleware(request: Request, call_next):
+    # Only track real user/client traffic; ignore internal self-pings so idle timer isn't tricked
+    if not request.headers.get("x-self-ping"):
+        keep_alive_manager.record_activity()
+    response = await call_next(request)
+    return response
+
 from app.routes.roadmap_routes import router as roadmap_router, admin_router as roadmap_admin_router
 from app.routes.auth_routes import router as auth_router, oauth_router
 from app.routes.dsa_sheet_routes import public_router, admin_router
@@ -67,6 +76,7 @@ from app.routes.live_class_routes import router as live_class_router
 from app.routes.potd_routes import router as potd_router
 from app.routes.contest_routes import router as contest_router
 from app.routes.cp_sheet_routes import router as cp_sheet_router
+from app.routes.admin_cache_routes import router as admin_cache_router
 from app.routes.test_routes.auth import router as test_auth_router
 from app.routes.test_routes.rbac import router as test_rbac_router
 app.include_router(roadmap_router, prefix="/api/v1")
@@ -96,6 +106,7 @@ app.include_router(live_class_router, prefix="/api/v1")
 app.include_router(potd_router, prefix="/api/v1")
 app.include_router(contest_router, prefix="/api/v1")
 app.include_router(cp_sheet_router, prefix="/api/v1")
+app.include_router(admin_cache_router, prefix="/api/v1")
 app.include_router(test_auth_router)
 app.include_router(test_rbac_router)
 
@@ -118,6 +129,14 @@ def on_startup():
         logger.error(f"Startup error: {str(e)}")
         raise
 
+    # Start the keep-alive self-ping loop (keeps Render free tier active)
+    keep_alive_manager.start()
+
+@app.on_event("shutdown")
+def on_shutdown():
+    """Shutdown event to cleanly terminate background tasks."""
+    keep_alive_manager.stop()
+
 @app.get("/")
 def read_root():
     return {"message": "CrackDSA API running"}
@@ -125,13 +144,14 @@ def read_root():
 @app.get("/health")
 def health_check(response: Response):
     """
-    Health check endpoint that reports app status and database connectivity.
+    Health check endpoint that reports app status, database connectivity, and keep-alive status.
     
     Returns:
-        dict: Health status with app status, database status, and timestamp
+        dict: Health status with app status, database status, keep-alive metrics, and timestamp
         Status Code: 200 if everything is healthy, 503 if database is unreachable
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
+    keep_alive_info = keep_alive_manager.status_summary
     
     try:
         # Check database connection
@@ -142,6 +162,7 @@ def health_check(response: Response):
             return {
                 "status": "ok",
                 "database": "connected",
+                "keep_alive": keep_alive_info,
                 "timestamp": timestamp
             }
         else:
@@ -149,6 +170,7 @@ def health_check(response: Response):
             return {
                 "status": "degraded",
                 "database": "disconnected",
+                "keep_alive": keep_alive_info,
                 "timestamp": timestamp
             }
     except Exception as e:
@@ -157,6 +179,7 @@ def health_check(response: Response):
         return {
             "status": "error",
             "database": "disconnected",
+            "keep_alive": keep_alive_info,
             "error": str(e),
             "timestamp": timestamp
         }
