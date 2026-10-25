@@ -2,6 +2,7 @@ import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from app.database import get_supabase_client
+from app.utils.cache import cache_manager
 
 def slugify(text: str) -> str:
     """Create a URL-safe slug from a string."""
@@ -98,6 +99,11 @@ def get_contests_paginated(
     """
     Fetch contest summaries with complete pagination metadata and aggregated platform statistics.
     """
+    cache_key = f"contest_paginated:{platform}:{search}:{sort_by}:{limit}:{page}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     select_fields = "contest, platform, created_at, difficulty, video_editorial"
     query = client.table("contest_editorials").select(select_fields)
@@ -197,7 +203,7 @@ def get_contests_paginated(
     end_idx = start_idx + limit
     items = filtered[start_idx:end_idx]
 
-    return {
+    result = {
         "items": items,
         "total_count": total_count,
         "total_pages": total_pages,
@@ -207,6 +213,8 @@ def get_contests_paginated(
         "total_problems": total_problems,
         "platforms": platforms_list,
     }
+    cache_manager.set(cache_key, result, ttl=86400, namespace="contests")
+    return result
 
 def get_contests(
     platform: Optional[str] = None, 
@@ -235,6 +243,11 @@ def get_contest_detail(platform: str, contest_slug: str, token: Optional[str] = 
     """
     Fetch a single contest with all its detailed problems and editorials.
     """
+    cache_key = f"contest_detail:{platform.lower().strip()}:{contest_slug.lower().strip()}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     p_clean = platform.lower().strip()
     
@@ -286,7 +299,7 @@ def get_contest_detail(platform: str, contest_slug: str, token: Optional[str] = 
     first_date = matched_rows[0].get("created_at") if matched_rows else ""
     contest_url = infer_contest_url(p_clean, contest_name, matched_rows)
     
-    return {
+    result = {
         "id": f"{p_clean}-{slugify(contest_name)}",
         "platform": p_clean,
         "contest": contest_name,
@@ -295,6 +308,8 @@ def get_contest_detail(platform: str, contest_slug: str, token: Optional[str] = 
         "contest_url": contest_url,
         "problems": enhanced_problems,
     }
+    cache_manager.set(cache_key, result, ttl=86400, namespace="contests")
+    return result
 
 def get_problem_editorial(
     platform: str, 
@@ -305,6 +320,11 @@ def get_problem_editorial(
     """
     Fetch a single contest problem editorial with sibling problem references.
     """
+    cache_key = f"contest_editorial:{platform.lower().strip()}:{contest_slug.lower().strip()}:{problem_slug.lower().strip()}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     contest_data = get_contest_detail(platform, contest_slug, token=token)
     if not contest_data:
         return None
@@ -338,7 +358,7 @@ def get_problem_editorial(
         for p in problems
     ]
     
-    return {
+    result = {
         "contest": {
             "id": contest_data["id"],
             "platform": contest_data["platform"],
@@ -359,3 +379,5 @@ def get_problem_editorial(
         } if next_problem else None,
         "siblings": siblings
     }
+    cache_manager.set(cache_key, result, ttl=86400, namespace="contests")
+    return result

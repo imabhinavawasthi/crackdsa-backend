@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from app.database import get_supabase_client
 from app.schemas.video_lecture import VideoLectureCreate, VideoLectureUpdate
 from app.utils.crypto import encrypt_media_url
+from app.utils.cache import cache_manager
 from fastapi import HTTPException, status
 from uuid import UUID
 import time
@@ -144,6 +145,13 @@ def get_video_lectures(
     - If include_inactive is true (admin audit), returns all lectures unmodified.
     - For public listing, redacts video_url for non-free videos if caller lacks Pro/enrollment.
     """
+    user_id = user.get("id") if user else "anon"
+    is_admin = bool(user and "admin" in (user.get("roles") or []))
+    cache_key = f"videos:list:{include_inactive}:{is_admin}:{user_id if is_admin else 'public'}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     query = client.table("video_lectures").select("*")
 
@@ -178,6 +186,7 @@ def get_video_lectures(
                 lecture_copy["video_url"] = encrypt_media_url(lecture_copy["video_url"])
         sanitized_lectures.append(lecture_copy)
 
+    cache_manager.set(cache_key, sanitized_lectures, ttl=86400, namespace="videos")
     return sanitized_lectures
 
 
@@ -195,6 +204,13 @@ def get_video_lecture_by_id(
     - Free lectures are open to all.
     - Paid lectures require an active Pro subscription or course purchase.
     """
+    user_id = user.get("id") if user else "anon"
+    is_admin = bool(user and "admin" in (user.get("roles") or []))
+    cache_key = f"videos:detail:{lecture_id}:{course_slug}:{item_id}:{is_admin}:{user_id}"
+    cached_val = cache_manager.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
     client = get_supabase_client(jwt_token=token)
     query = client.table("video_lectures").select("*").eq("id", str(lecture_id))
 
@@ -233,6 +249,7 @@ def get_video_lecture_by_id(
     if lecture.get("video_url"):
         lecture["video_url"] = encrypt_media_url(lecture["video_url"])
 
+    cache_manager.set(cache_key, lecture, ttl=86400, namespace="videos")
     return lecture
 
 
@@ -249,6 +266,9 @@ def create_video_lecture(lecture_data: VideoLectureCreate, token: Optional[str] 
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to create video lecture")
 
+    cache_manager.invalidate_namespace("videos")
+    cache_manager.invalidate_namespace("courses")
+    cache_manager.invalidate_namespace("live_classes")
     return response.data[0]
 
 
@@ -274,6 +294,9 @@ def update_video_lecture(lecture_id: UUID, update_data: VideoLectureUpdate, toke
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Video lecture with id {lecture_id} not found or inactive")
 
+    cache_manager.invalidate_namespace("videos")
+    cache_manager.invalidate_namespace("courses")
+    cache_manager.invalidate_namespace("live_classes")
     return response.data[0]
 
 
@@ -291,4 +314,7 @@ def soft_delete_video_lecture(lecture_id: UUID, token: Optional[str] = None) -> 
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Video lecture with id {lecture_id} not found")
 
+    cache_manager.invalidate_namespace("videos")
+    cache_manager.invalidate_namespace("courses")
+    cache_manager.invalidate_namespace("live_classes")
     return True
