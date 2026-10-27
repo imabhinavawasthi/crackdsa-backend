@@ -260,13 +260,10 @@ class LiveClassService:
     @classmethod
     def _is_user_pro_or_admin(cls, user: Optional[Dict[str, Any]], now: int) -> bool:
         """
-        Check if user has an active Pro subscription or admin privileges.
+        Check if user has an active Pro subscription or active 1-year live class access via DSA course purchase.
         """
         if not user:
             return False
-        roles = user.get("roles") or []
-        if "admin" in roles:
-            return True
 
         user_id = user.get("id")
         if not user_id:
@@ -274,22 +271,67 @@ class LiveClassService:
 
         try:
             client = get_supabase_client()
-            u_res = client.table("users").select("pro_subscription").eq("id", str(user_id)).execute()
+            u_res = client.table("users").select("pro_subscription, purchased_courses").eq("id", str(user_id)).execute()
             if u_res.data:
                 db_user = u_res.data[0]
+
+                # 1. Active Pro Subscription Check
                 pro_sub = db_user.get("pro_subscription") or {}
                 if "subscription_active_till_epoch" in pro_sub:
                     try:
                         expiry = int(pro_sub.get("subscription_active_till_epoch", 0))
-                        return (expiry == -1) or (expiry > now)
+                        if (expiry == -1) or (expiry > now):
+                            return True
                     except (ValueError, TypeError):
                         pass
                 is_active = pro_sub.get("is_active", False)
                 if isinstance(is_active, str):
-                    return is_active.lower() == "true"
-                return bool(is_active)
+                    if is_active.lower() == "true":
+                        return True
+                elif bool(is_active):
+                    return True
+
+                # 2. DSA Course Purchase Check: 1 Year (365 days) of Live Classes from purchase date
+                pc = db_user.get("purchased_courses") or {}
+                if isinstance(pc, dict) and "courses" in pc and isinstance(pc["courses"], list):
+                    courses_arr = pc["courses"]
+                elif isinstance(pc, dict):
+                    courses_arr = [{"course_id": k, **(v if isinstance(v, dict) else {})} for k, v in pc.items()]
+                elif isinstance(pc, list):
+                    courses_arr = pc
+                else:
+                    courses_arr = []
+
+                one_year_seconds = 365 * 86400  # 365 days
+                dsa_identifiers = {"dsa", "data-structures-algorithms-mastery-program"}
+
+                for c in courses_arr:
+                    c_id = str(c.get("course_id") or "").lower()
+                    c_slug = str(c.get("course_slug") or "").lower()
+                    c_name = str(c.get("course_name") or "").lower()
+
+                    is_dsa_course = (
+                        c_id in dsa_identifiers or
+                        c_slug in dsa_identifiers or
+                        "data structures" in c_name or
+                        "dsa" in c_name
+                    )
+
+                    if is_dsa_course:
+                        purchase_epoch = c.get("purchase_date_epoch")
+                        if purchase_epoch:
+                            try:
+                                p_epoch = int(purchase_epoch)
+                                if now < (p_epoch + one_year_seconds):
+                                    return True
+                            except (ValueError, TypeError):
+                                return True
+                        else:
+                            # If no purchase epoch specified, grant access
+                            return True
+
         except Exception as e:
-            logger.error(f"Error checking user pro subscription for live class: {e}")
+            logger.error(f"Error checking user pro/course entitlement for live class: {e}")
 
         return False
 

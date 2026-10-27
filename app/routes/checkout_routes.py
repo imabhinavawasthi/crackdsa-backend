@@ -222,7 +222,7 @@ async def create_order(
             "metadata": {
                 "full_name": user.get("full_name") or "",
                 "avatar_url": user.get("avatar_url") or "",
-                "onboarding_completed": False
+                "onboarding_completed": True
             },
             "pro_subscription": {},
             "purchased_courses": {}
@@ -309,23 +309,48 @@ def fulfill_purchase(client: Any, tx: Dict[str, Any], payment_id: Optional[str] 
 
     elif tx["purchase_type"] == "course":
         purchased_courses = user_row.get("purchased_courses") or {}
+        if not isinstance(purchased_courses, dict):
+            purchased_courses = {"courses": []}
         courses_arr = purchased_courses.get("courses", [])
+        if not isinstance(courses_arr, list):
+            courses_arr = []
 
-        course_id = tx["target_id"]
+        target = tx.get("target_id") or ""
         metadata = tx.get("metadata") or {}
-        course_name = metadata.get("target_name", course_id)
 
-        already_purchased = any(c.get("course_id") == course_id for c in courses_arr)
+        # Look up course row to capture canonical UUID, slug, and title
+        c_res = client.table("courses").select("id, slug, title").or_(f"id.eq.{target},slug.eq.{target}").execute()
+        if not c_res.data and target == "data-structures-algorithms-mastery-program":
+            c_res = client.table("courses").select("id, slug, title").eq("slug", "dsa").execute()
+
+        c_id = str(c_res.data[0]["id"]) if c_res.data else str(target)
+        c_slug = str(c_res.data[0]["slug"]) if c_res.data else str(target)
+        c_title = c_res.data[0]["title"] if c_res.data else (metadata.get("target_name") or target)
+
+        already_purchased = any(
+            str(c.get("course_id") or "") in (c_id, c_slug) or
+            str(c.get("course_slug") or "") in (c_id, c_slug)
+            for c in courses_arr
+        )
         if not already_purchased:
             courses_arr.append({
-                "course_id": course_id,
+                "course_id": c_id,
+                "course_slug": c_slug,
+                "course_name": c_title,
                 "purchase_date_epoch": int(now.timestamp()),
                 "valid_till_epoch": -1,
-                "course_name": course_name,
                 "transaction_id": str(tx["id"])
             })
             purchased_courses["courses"] = courses_arr
             client.table("users").update({"purchased_courses": purchased_courses}).eq("id", user_id).execute()
+
+    # 4. Invalidate relevant caches immediately
+    try:
+        from app.utils.cache import cache_manager
+        cache_manager.invalidate_namespace("live_classes")
+        cache_manager.invalidate_namespace("courses")
+    except Exception as e:
+        logger.warning(f"Cache invalidation error after purchase fulfillment: {e}")
 
 
 @router.post("/verify")

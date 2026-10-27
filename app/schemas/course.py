@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 
 class CourseCategoryEnum(str, Enum):
@@ -7,6 +7,8 @@ class CourseCategoryEnum(str, Enum):
     CORE_DSA = "core-dsa"
     SYSTEM_DESIGN = "system-design"
     SPECIALIZED = "specialized"
+    ADVANCED = "advanced"
+    PROGRAMMING_LANGUAGES = "programming-languages"
 
 class CourseStatusEnum(str, Enum):
     ACTIVE = "active"
@@ -137,12 +139,12 @@ class CourseSummaryResponseSchema(BaseModel):
     slug: str
     title: str
     description: str
-    category: CourseCategoryEnum
+    category: Union[CourseCategoryEnum, str]
     instructor_ids: List[str] = []
     tags: List[str] = []
     is_pro: bool = True
     is_popular: bool = False
-    status: CourseStatusEnum
+    status: Union[CourseStatusEnum, str]
     price: int
     original_price: int
     total_problems: int = 0
@@ -158,14 +160,14 @@ class CourseResponseSchema(BaseModel):
     slug: str                                           # SEO slug (e.g. 'dsa-bootcamp-recordings')
     title: str
     description: str
-    category: CourseCategoryEnum
+    category: Union[CourseCategoryEnum, str]
     
     instructor_ids: List[str] = []
     
     tags: List[str] = []
     is_pro: bool = True
     is_popular: bool = False
-    status: CourseStatusEnum
+    status: Union[CourseStatusEnum, str]
     price: int
     original_price: int
     

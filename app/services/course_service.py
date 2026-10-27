@@ -27,6 +27,13 @@ class CourseService:
     ARTICLES_TABLE = "articles"
 
     @staticmethod
+    def _normalize_slug(course_id_or_slug: str) -> str:
+        """Alias legacy course slugs to canonical database slugs"""
+        if course_id_or_slug == "data-structures-algorithms-mastery-program":
+            return "dsa"
+        return course_id_or_slug
+
+    @staticmethod
     def _calculate_dynamic_counts(curriculum: list) -> tuple[int, int, int]:
         """Helper to compute counts of problems, articles, and videos from JSONB curriculum"""
         problems = 0
@@ -200,6 +207,7 @@ class CourseService:
     @staticmethod
     def get_course_summary_by_id(course_id_or_slug: str) -> CourseSummaryResponseSchema:
         """Fetch a specific course summary by UUID or slug, without full curriculum hydration"""
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         cache_key = f"courses:summary:{course_id_or_slug}"
         cached_val = cache_manager.get(cache_key)
         if cached_val is not None:
@@ -244,6 +252,7 @@ class CourseService:
     @staticmethod
     def get_course_by_id(course_id_or_slug: str) -> CourseResponseSchema:
         """Fetch a specific course full object by UUID or slug (Admin use, ignores is_active)"""
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         client = get_supabase_client()
         
         from uuid import UUID
@@ -280,6 +289,7 @@ class CourseService:
     @staticmethod
     def get_course_curriculum(course_id_or_slug: str) -> List[CourseSection]:
         """Fetch only the curriculum tree for a specific course by UUID or slug"""
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         cache_key = f"courses:curriculum:{course_id_or_slug}"
         cached_val = cache_manager.get(cache_key)
         if cached_val is not None:
@@ -396,11 +406,7 @@ class CourseService:
 
     @staticmethod
     def _check_user_entitlement(user: Dict[str, Any], course: Dict[str, Any], client: Any) -> bool:
-        """Check if user has permission to access paid course content"""
-        roles = user.get("roles") or []
-        if "admin" in roles:
-            return True
-
+        """Check if user has permission to access paid course content based on Pro subscription or course purchase"""
         user_id = user.get("id")
         if not user_id:
             return False
@@ -425,13 +431,25 @@ class CourseService:
 
         # 2. Individual purchase check
         pc = db_user.get("purchased_courses") or {}
-        courses_arr = pc.get("courses", []) if isinstance(pc, dict) else []
-        cid = str(course.get("id"))
-        cslug = str(course.get("slug"))
+        if isinstance(pc, dict) and "courses" in pc and isinstance(pc["courses"], list):
+            courses_arr = pc["courses"]
+        elif isinstance(pc, dict):
+            courses_arr = [{"course_id": k, **(v if isinstance(v, dict) else {})} for k, v in pc.items()]
+        elif isinstance(pc, list):
+            courses_arr = pc
+        else:
+            courses_arr = []
+
+        cid = str(course.get("id") or "").lower()
+        cslug = str(course.get("slug") or "").lower()
+        allowed_slugs = {cid, cslug}
+        if cslug == "dsa":
+            allowed_slugs.add("data-structures-algorithms-mastery-program")
 
         for c in courses_arr:
-            purchased_cid = str(c.get("course_id") or "")
-            if purchased_cid in (cid, cslug):
+            purchased_cid = str(c.get("course_id") or "").lower()
+            purchased_cslug = str(c.get("course_slug") or "").lower()
+            if (purchased_cid and purchased_cid in allowed_slugs) or (purchased_cslug and purchased_cslug in allowed_slugs):
                 valid_till = c.get("valid_till_epoch", -1)
                 if valid_till == -1 or valid_till > now_epoch:
                     return True
@@ -463,12 +481,25 @@ class CourseService:
 
         # Check individually purchased courses
         pc = db_user.get("purchased_courses") or {}
-        courses_arr = pc.get("courses", []) if isinstance(pc, dict) else []
+        if isinstance(pc, dict) and "courses" in pc and isinstance(pc["courses"], list):
+            courses_arr = pc["courses"]
+        elif isinstance(pc, dict):
+            courses_arr = [{"course_id": k, **(v if isinstance(v, dict) else {})} for k, v in pc.items()]
+        elif isinstance(pc, list):
+            courses_arr = pc
+        else:
+            courses_arr = []
+
         purchased_ids_or_slugs = set()
         for c in courses_arr:
             cid = c.get("course_id")
+            cslug = c.get("course_slug")
             if cid:
-                purchased_ids_or_slugs.add(str(cid))
+                purchased_ids_or_slugs.add(str(cid).lower())
+            if cslug:
+                purchased_ids_or_slugs.add(str(cslug).lower())
+                if str(cslug).lower() == "dsa":
+                    purchased_ids_or_slugs.add("data-structures-algorithms-mastery-program")
 
         matched_courses_dict = {}
 
@@ -511,6 +542,7 @@ class CourseService:
     @staticmethod
     def get_course_detail(course_id_or_slug: str, is_admin: bool = False) -> CourseDetailResponseSchema:
         """Fetch all course columns EXCEPT curriculum. Admins can view any status, public can only view active."""
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         cache_key = f"courses:detail:{course_id_or_slug}:{is_admin}"
         cached_val = cache_manager.get(cache_key)
         if cached_val is not None:
@@ -562,6 +594,7 @@ class CourseService:
     @staticmethod
     def get_course_curriculum_by_topic(course_id_or_slug: str, topic: Optional[str] = None, is_admin: bool = False) -> List[CourseSection]:
         """Fetch curriculum tree for a course. Optionally filters to a single topic/section if topic is provided."""
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         cache_key = f"courses:curriculum_topic:{course_id_or_slug}:{topic}:{is_admin}"
         cached_val = cache_manager.get(cache_key)
         if cached_val is not None:
@@ -620,6 +653,7 @@ class CourseService:
     @staticmethod
     def get_course_video(course_id_or_slug: str, section_id: str, item_id: str, user: Optional[Dict[str, Any]]) -> CourseVideoAccessResponse:
         """Access a specific video item in a course. Free videos are open to all; paid videos require Pro or course purchase."""
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         client = get_supabase_client()
 
         from uuid import UUID
@@ -824,6 +858,7 @@ class CourseService:
         """
         Fetch details for multiple topics in a single call by matching section titles case-insensitively and trimmed.
         """
+        course_id_or_slug = CourseService._normalize_slug(course_id_or_slug)
         sorted_topics_key = ",".join(sorted(topics or []))
         cache_key = f"courses:batch_topics:{course_id_or_slug}:{sorted_topics_key}"
         cached_val = cache_manager.get(cache_key)
