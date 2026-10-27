@@ -35,11 +35,18 @@ def get_supabase_client(jwt_token: str = None) -> Client:
     # 2. Administrative/Global Client (RLS-bypass)
     # Uses the Service Role Key for background/admin tasks
     global _supabase_client
+    admin_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
+    expected_auth = f"Bearer {admin_key}"
+
     if _supabase_client is not None:
+        # Guarantee that the global client is never contaminated with a user-specific or expired JWT
+        if _supabase_client.options.headers.get("Authorization") != expected_auth:
+            _supabase_client.options.headers["Authorization"] = expected_auth
+            if hasattr(_supabase_client, "_postgrest") and _supabase_client._postgrest is not None:
+                _supabase_client._postgrest.session.headers["authorization"] = expected_auth
         return _supabase_client
     
     # Preferred: Use Service Role Key for admin operations if available
-    admin_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
     _supabase_client = create_client(settings.SUPABASE_URL, admin_key)
     return _supabase_client
 

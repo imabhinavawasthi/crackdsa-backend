@@ -53,13 +53,31 @@ def _hydrate_user_profile_response(
         
     pc = db_user.get("purchased_courses") or {}
     purchased_courses = []
-    if "courses" in pc:
+    if isinstance(pc, dict) and "courses" in pc and isinstance(pc["courses"], list):
         courses = pc.get("courses", [])
-        purchased_courses = [{"course_id": c.get("course_id"), "course_name": c.get("course_name")} for c in courses]
-    else:
+        for c in courses:
+            purchased_courses.append({
+                "course_id": c.get("course_id"),
+                "course_slug": c.get("course_slug") or c.get("course_id"),
+                "course_name": c.get("course_name")
+            })
+    elif isinstance(pc, dict):
         # Legacy mapping
-        for c_id, _ in pc.items():
-            purchased_courses.append({"course_id": c_id, "course_name": c_id})
+        for c_id, val in pc.items():
+            name = val.get("course_name", c_id) if isinstance(val, dict) else c_id
+            purchased_courses.append({
+                "course_id": c_id,
+                "course_slug": c_id,
+                "course_name": name
+            })
+    elif isinstance(pc, list):
+        for c in pc:
+            if isinstance(c, dict):
+                purchased_courses.append({
+                    "course_id": c.get("course_id"),
+                    "course_slug": c.get("course_slug") or c.get("course_id"),
+                    "course_name": c.get("course_name")
+                })
             
     pro_courses = []
     if is_pro_active:
@@ -67,7 +85,14 @@ def _hydrate_user_profile_response(
             # Query all active courses where is_pro is True
             courses_res = client.table("courses").select("id, slug, title, is_pro, is_active").eq("is_pro", True).eq("is_active", True).execute()
             if courses_res.data:
-                pro_courses = [{"course_id": c.get("slug") or c.get("id"), "course_name": c.get("title")} for c in courses_res.data]
+                for c in courses_res.data:
+                    c_slug = c.get("slug") or c.get("id")
+                    c_id = c.get("id") or c_slug
+                    pro_courses.append({
+                        "course_id": c_id,
+                        "course_slug": c_slug,
+                        "course_name": c.get("title")
+                    })
         except Exception as e:
             logger.error(f"Error fetching pro subscription courses: {str(e)}")
 
@@ -75,14 +100,18 @@ def _hydrate_user_profile_response(
     seen_course_ids = set()
     enrolled_courses = []
     for c in (purchased_courses + pro_courses):
-        if c["course_id"] not in seen_course_ids:
-            seen_course_ids.add(c["course_id"])
+        cid = str(c.get("course_id") or "")
+        cslug = str(c.get("course_slug") or "")
+        if (cid and cid not in seen_course_ids) or (cslug and cslug not in seen_course_ids):
+            if cid:
+                seen_course_ids.add(cid)
+            if cslug:
+                seen_course_ids.add(cslug)
             enrolled_courses.append(c)
             
     db_metadata = db_user.get("metadata") or {}
-    onboarding_completed = bool(db_metadata.get("onboarding_completed", False))
-    has_college = bool(db_user.get("college"))
-    needs_onboarding = is_new_user or (not onboarding_completed and not has_college)
+    # Onboarding is skipped by default now; users can edit profile details anytime in settings
+    needs_onboarding = False
 
     response_data = {
         **user,
@@ -158,7 +187,7 @@ async def me(
                     "metadata": {
                         "full_name": user.get("full_name") or "",
                         "avatar_url": user.get("avatar_url") or "",
-                        "onboarding_completed": False
+                        "onboarding_completed": True
                     },
                     "pro_subscription": {},
                     "purchased_courses": {}
@@ -337,7 +366,9 @@ async def token_status(user: Optional[Dict[str, Any]] = Depends(get_current_user
 async def refresh_token(data: RefreshTokenSchema):
     """Silently refresh a user's session using their refresh token."""
     try:
-        client = get_supabase_client()
+        # Create an isolated client for token refresh to prevent session state pollution on the global client
+        from supabase import create_client
+        client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         # Supabase Python client auth.refresh_session returns an AuthResponse
         resp = client.auth.refresh_session(data.refresh_token)
         session = resp.session
