@@ -12,12 +12,11 @@ class VideoLectureBase(BaseModel):
     thumbnail_url: Optional[str] = None
     resources: Dict[str, Any] = Field(default_factory=dict)
     attributes: Dict[str, Any] = Field(default_factory=dict)
-    is_free: Optional[bool] = False
-    is_locked: Optional[bool] = False
 
 # --- Video Lecture Creation Schema ---
 class VideoLectureCreate(VideoLectureBase):
     video_url: str
+    is_free: Optional[bool] = None
 
 # --- Video Lecture Update Schema ---
 class VideoLectureUpdate(BaseModel):
@@ -31,6 +30,7 @@ class VideoLectureUpdate(BaseModel):
     thumbnail_url: Optional[str] = None
     resources: Optional[Dict[str, Any]] = None
     attributes: Optional[Dict[str, Any]] = None
+    is_free: Optional[bool] = None
 
 # --- Complete Video Lecture Response Schema ---
 class VideoLecture(VideoLectureBase):
@@ -38,6 +38,8 @@ class VideoLecture(VideoLectureBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    is_free: Optional[bool] = False
+    is_locked: Optional[bool] = False
 
     class Config:
         from_attributes = True

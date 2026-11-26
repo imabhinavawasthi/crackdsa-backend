@@ -64,8 +64,14 @@ class CourseMetadataSchema(BaseModel):
     total_projects: int = 0
     marketing_syllabus: List[str] = []
     thumbnail_url: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    promo_video_url: Optional[str] = None
+    language: Optional[str] = "English / Hinglish"
+    has_live_classes: Optional[bool] = False
     prerequisites: List[str] = []
     learning_outcomes: List[str] = []
+    features: List[str] = []
+    requirements: List[str] = []
     rating: float = 5.0
     reviews: int = 0
     number_of_students: int = 0
@@ -189,7 +195,7 @@ class CourseCreateSchema(BaseModel):
     slug: str                                           # SEO-friendly URL slug key
     title: str
     description: str
-    category: CourseCategoryEnum
+    category: Union[CourseCategoryEnum, str]
     id: Optional[str] = None                            # UUID string (optional, auto-generated)
     instructor_ids: List[str] = []                      # Array of instructor UUIDs
     tags: List[str] = []
@@ -198,14 +204,14 @@ class CourseCreateSchema(BaseModel):
     price: int
     original_price: int
     curriculum: List[CourseSection] = []
-    status: CourseStatusEnum = CourseStatusEnum.DRAFT
-    metadata: Optional[CourseMetadataSchema] = None
+    status: Union[CourseStatusEnum, str] = CourseStatusEnum.DRAFT
+    metadata: Optional[Union[CourseMetadataSchema, Dict[str, Any]]] = None
 
 class CourseUpdateSchema(BaseModel):
     slug: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
-    category: Optional[CourseCategoryEnum] = None
+    category: Optional[Union[CourseCategoryEnum, str]] = None
     instructor_ids: Optional[List[str]] = None
     tags: Optional[List[str]] = None
     is_pro: Optional[bool] = None
@@ -213,8 +219,8 @@ class CourseUpdateSchema(BaseModel):
     price: Optional[int] = None
     original_price: Optional[int] = None
     curriculum: Optional[List[CourseSection]] = None
-    status: Optional[CourseStatusEnum] = None
-    metadata: Optional[CourseMetadataSchema] = None
+    status: Optional[Union[CourseStatusEnum, str]] = None
+    metadata: Optional[Union[CourseMetadataSchema, Dict[str, Any]]] = None
 
 class BatchTopicRequestSchema(BaseModel):
     topics: List[str]

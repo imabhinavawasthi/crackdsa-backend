@@ -177,6 +177,39 @@ def get_course_video_item(
             detail="Failed to fetch video details"
         )
 
+@public_router.post("/{course_id_or_slug}/enroll")
+def enroll_free_course_endpoint(
+    course_id_or_slug: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Enroll an authenticated user into a free course (price <= 0).
+    """
+    try:
+        return CourseService.enroll_free_course(user=user, course_id_or_slug=course_id_or_slug)
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )
+    except ValueError as e:
+        err_msg = str(e)
+        if "not free" in err_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=err_msg
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=err_msg
+        )
+    except Exception as e:
+        logger.error(f"Error enrolling user in course '{course_id_or_slug}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to enroll in free course"
+        )
+
 @public_router.post("/{course_id}/batch-topic-details", response_model=BatchTopicResponseSchema)
 @public_router.post("/{course_id}/batch-topic-details/", response_model=BatchTopicResponseSchema, include_in_schema=False)
 def get_batch_topic_details_public(course_id: str, body: BatchTopicRequestSchema):
