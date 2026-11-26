@@ -57,6 +57,8 @@ async def create_lecture_handler(lecture_data: VideoLectureCreate, token: str = 
     """
     try:
         return video_lecture_service.create_video_lecture(lecture_data, token=token)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -10,6 +10,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+VALID_DB_COLUMNS = {
+    "title",
+    "description",
+    "video_url",
+    "duration_seconds",
+    "thumbnail_url",
+    "resources",
+    "attributes",
+    "is_active",
+}
+
 
 def check_video_access(
     lecture: Dict[str, Any],
@@ -95,40 +106,45 @@ def check_video_access(
             if (isinstance(is_active, str) and is_active.lower() == "true") or bool(is_active):
                 return True, False
 
-            # Check individual course purchase for courses containing this video
+            # Check course access (free course or individual purchase)
             pc = db_user.get("purchased_courses") or {}
             courses_arr = pc.get("courses", []) if isinstance(pc, dict) else (pc if isinstance(pc, list) else [])
-            if courses_arr:
-                courses_data = courses_cache
-                if courses_data is None:
-                    c_res = client.table("courses").select("id, slug, is_pro, curriculum").execute()
-                    courses_data = c_res.data or []
 
-                for course in courses_data:
-                    contains_video = False
-                    for sec in (course.get("curriculum") or []):
-                        for itm in (sec.get("items") or []):
+            courses_data = courses_cache
+            if courses_data is None:
+                c_res = client.table("courses").select("id, slug, is_pro, curriculum, price").execute()
+                courses_data = c_res.data or []
+
+            for course in courses_data:
+                contains_video = False
+                for sec in (course.get("curriculum") or []):
+                    for itm in (sec.get("items") or []):
+                        if itm.get("type") == "video" and str(itm.get("asset_id") or "") == lecture_id:
+                            contains_video = True
+                            break
+                    if contains_video:
+                        break
+                    for sub in (sec.get("subsections") or []):
+                        for itm in (sub.get("items") or []):
                             if itm.get("type") == "video" and str(itm.get("asset_id") or "") == lecture_id:
                                 contains_video = True
                                 break
                         if contains_video:
                             break
-                        for sub in (sec.get("subsections") or []):
-                            for itm in (sub.get("items") or []):
-                                if itm.get("type") == "video" and str(itm.get("asset_id") or "") == lecture_id:
-                                    contains_video = True
-                                    break
-                            if contains_video:
-                                break
 
-                    if contains_video:
-                        cid = str(course.get("id"))
-                        cslug = str(course.get("slug"))
-                        for p in courses_arr:
-                            if str(p.get("course_id") or "") in (cid, cslug):
-                                valid_till = p.get("valid_till_epoch", -1)
-                                if valid_till == -1 or valid_till > now_epoch:
-                                    return True, False
+                if contains_video:
+                    # Free courses grant access to all authenticated users
+                    if (course.get("price") or 0) <= 0:
+                        return True, False
+
+                    # Check individual course purchase
+                    cid = str(course.get("id"))
+                    cslug = str(course.get("slug"))
+                    for p in courses_arr:
+                        if str(p.get("course_id") or "") in (cid, cslug) or str(p.get("course_slug") or "") in (cid, cslug):
+                            valid_till = p.get("valid_till_epoch", -1)
+                            if valid_till == -1 or valid_till > now_epoch:
+                                return True, False
     except Exception as e:
         logger.error(f"Error checking user entitlement for lecture {lecture_id}: {e}")
 
@@ -162,6 +178,10 @@ def get_video_lectures(
     raw_lectures = response.data or []
 
     if include_inactive:
+        for itm in raw_lectures:
+            attrs = itm.get("attributes") or {}
+            itm["is_free"] = attrs.get("is_free", False)
+            itm["is_locked"] = False
         return raw_lectures
 
     # Cache courses once for all lectures
@@ -223,6 +243,9 @@ def get_video_lecture_by_id(
 
     lecture = response.data[0]
     if include_inactive:
+        attrs = lecture.get("attributes") or {}
+        lecture["is_free"] = attrs.get("is_free", False)
+        lecture["is_locked"] = False
         return lecture
 
     has_access, is_free = check_video_access(
@@ -259,17 +282,33 @@ def create_video_lecture(lecture_data: VideoLectureCreate, token: Optional[str] 
     """
     client = get_supabase_client(jwt_token=token)
 
+    data = lecture_data.dict()
+
+    # If is_free is specified, store in attributes
+    if data.get("is_free") is not None:
+        attrs = data.get("attributes") or {}
+        attrs["is_free"] = bool(data["is_free"])
+        data["attributes"] = attrs
+
+    # Only include physical columns in video_lectures relation
+    insert_payload = {k: v for k, v in data.items() if k in VALID_DB_COLUMNS}
+
     response = client.table("video_lectures") \
-        .insert(lecture_data.dict()) \
+        .insert(insert_payload) \
         .execute()
 
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to create video lecture")
 
+    created = response.data[0]
+    attrs = created.get("attributes") or {}
+    created["is_free"] = attrs.get("is_free", False)
+    created["is_locked"] = False
+
     cache_manager.invalidate_namespace("videos")
     cache_manager.invalidate_namespace("courses")
     cache_manager.invalidate_namespace("live_classes")
-    return response.data[0]
+    return created
 
 
 def update_video_lecture(lecture_id: UUID, update_data: VideoLectureUpdate, token: Optional[str] = None) -> dict:
@@ -283,10 +322,21 @@ def update_video_lecture(lecture_id: UUID, update_data: VideoLectureUpdate, toke
     if not data:
         return get_video_lecture_by_id(lecture_id, include_inactive=True, token=token)
 
-    data["updated_at"] = "now()"
+    # If is_free is in update payload, store inside attributes
+    if "is_free" in data and data["is_free"] is not None:
+        if "attributes" not in data or data["attributes"] is None:
+            curr_res = client.table("video_lectures").select("attributes").eq("id", str(lecture_id)).execute()
+            curr_attrs = curr_res.data[0].get("attributes") or {} if curr_res.data else {}
+        else:
+            curr_attrs = data["attributes"] or {}
+        curr_attrs["is_free"] = bool(data["is_free"])
+        data["attributes"] = curr_attrs
+
+    update_payload = {k: v for k, v in data.items() if k in VALID_DB_COLUMNS}
+    update_payload["updated_at"] = "now()"
 
     response = client.table("video_lectures") \
-        .update(data) \
+        .update(update_payload) \
         .eq("id", str(lecture_id)) \
         .eq("is_active", True) \
         .execute()
@@ -294,10 +344,15 @@ def update_video_lecture(lecture_id: UUID, update_data: VideoLectureUpdate, toke
     if not response.data:
         raise HTTPException(status_code=404, detail=f"Video lecture with id {lecture_id} not found or inactive")
 
+    updated = response.data[0]
+    attrs = updated.get("attributes") or {}
+    updated["is_free"] = attrs.get("is_free", False)
+    updated["is_locked"] = False
+
     cache_manager.invalidate_namespace("videos")
     cache_manager.invalidate_namespace("courses")
     cache_manager.invalidate_namespace("live_classes")
-    return response.data[0]
+    return updated
 
 
 def soft_delete_video_lecture(lecture_id: UUID, token: Optional[str] = None) -> bool:

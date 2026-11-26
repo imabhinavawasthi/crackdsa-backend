@@ -1,5 +1,6 @@
 from app.database import get_supabase_client
 from app.utils.cache import cache_manager
+from app.utils.crypto import encrypt_media_url
 from app.schemas.course import (
     CourseCreateSchema,
     CourseUpdateSchema,
@@ -407,7 +408,11 @@ class CourseService:
     @staticmethod
     def _check_user_entitlement(user: Dict[str, Any], course: Dict[str, Any], client: Any) -> bool:
         """Check if user has permission to access paid course content based on Pro subscription or course purchase"""
-        user_id = user.get("id")
+        # Free courses are accessible to any user
+        if (course.get("price") or 0) <= 0:
+            return True
+
+        user_id = user.get("id") if user else None
         if not user_id:
             return False
 
@@ -538,6 +543,89 @@ class CourseService:
                 slug=c["slug"]
             ))
         return results
+
+    @staticmethod
+    def enroll_free_course(user: Dict[str, Any], course_id_or_slug: str) -> Dict[str, Any]:
+        """Enroll an authenticated user into a free course (price <= 0)."""
+        user_id = user.get("id")
+        if not user_id:
+            raise PermissionError("Authentication required to enroll")
+
+        client = get_supabase_client()
+        normalized = CourseService._normalize_slug(course_id_or_slug)
+
+        from uuid import UUID
+        is_uuid = False
+        try:
+            UUID(normalized)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+
+        query = client.table(CourseService.COURSES_TABLE).select("id, slug, title, price, status")
+        if is_uuid:
+            query = query.eq("id", normalized)
+        else:
+            query = query.eq("slug", normalized)
+
+        res = query.execute()
+        if not res.data or len(res.data) == 0:
+            raise ValueError(f"Course '{course_id_or_slug}' not found")
+
+        course = res.data[0]
+        price = course.get("price") or 0
+        if price > 0:
+            raise ValueError("This course is not free. Payment is required to enroll.")
+
+        cid = str(course["id"])
+        cslug = str(course["slug"])
+        ctitle = course.get("title") or cslug
+
+        # Get existing purchased_courses
+        u_res = client.table("users").select("purchased_courses").eq("id", user_id).execute()
+        if not u_res.data:
+            raise ValueError("User record not found")
+
+        db_user = u_res.data[0]
+        pc = db_user.get("purchased_courses") or {}
+        if not isinstance(pc, dict):
+            pc = {"courses": []}
+        courses_arr = pc.get("courses", [])
+        if not isinstance(courses_arr, list):
+            courses_arr = []
+
+        already_enrolled = any(
+            str(c.get("course_id") or "") in (cid, cslug) or
+            str(c.get("course_slug") or "") in (cid, cslug)
+            for c in courses_arr
+        )
+
+        if not already_enrolled:
+            courses_arr.append({
+                "course_id": cid,
+                "course_slug": cslug,
+                "course_name": ctitle,
+                "purchase_date_epoch": int(time.time()),
+                "valid_till_epoch": -1,
+                "transaction_id": "free_enrollment"
+            })
+            pc["courses"] = courses_arr
+            client.table("users").update({"purchased_courses": pc}).eq("id", user_id).execute()
+
+            # Invalidate caches
+            try:
+                cache_manager.invalidate_namespace("courses")
+            except Exception as e:
+                logger.warning(f"Cache invalidation error after free course enrollment: {e}")
+
+        return {
+            "status": "success",
+            "message": "Enrolled successfully in free course",
+            "course_id": cid,
+            "course_slug": cslug,
+            "course_title": ctitle,
+            "enrolled": True
+        }
 
     @staticmethod
     def get_course_detail(course_id_or_slug: str, is_admin: bool = False) -> CourseDetailResponseSchema:
@@ -735,7 +823,7 @@ class CourseService:
             section_id=str(section_id),
             title=target_item.get("title") or vid_data.get("title") or "Video Lecture",
             asset_id=str(asset_id),
-            video_url=vid_data.get("video_url", ""),
+            video_url=encrypt_media_url(vid_data.get("video_url", "")) or "",
             duration_seconds=vid_data.get("duration_seconds", 0),
             thumbnail_url=vid_data.get("thumbnail_url"),
             resources=vid_data.get("resources") or {},
@@ -819,7 +907,12 @@ class CourseService:
         if data.status is not None:
             payload["status"] = data.status
         if data.metadata is not None:
-            payload["metadata"] = data.metadata.model_dump()
+            if hasattr(data.metadata, "model_dump"):
+                payload["metadata"] = data.metadata.model_dump()
+            elif isinstance(data.metadata, dict):
+                payload["metadata"] = data.metadata
+            else:
+                payload["metadata"] = dict(data.metadata)
             
         payload["updated_at"] = "now()"
         
